@@ -1,10 +1,13 @@
 from typing import Tuple
 
 import numpy as np
+import pyarrow as pa
+import quivr as qv
 from adam_core.observers import Observers
 from adam_core.orbits import Orbits
 from adam_core.propagator import Propagator
 from adam_core.time import Timestamp
+from precovery.main import PrecoveryCandidatesQv
 
 
 def calculate_astrometric_uncertainty(
@@ -105,3 +108,124 @@ def compute_search_window_and_tolerance(
         return np.nan, np.nan, np.nan
 
     return valid_mjds.min(), valid_mjds.max(), valid_tolerances.max() * 3600
+
+
+def check_candidates_astrometric_errors(
+    candidates: PrecoveryCandidatesQv,
+    astrometric_errors: dict[str, Tuple[float, float]],
+) -> PrecoveryCandidatesQv:
+    """
+    Check if the precovery candidates contain any missing uncertainties. If they do then
+    assign a default uncertainty to them.
+
+    Parameters
+    ----------
+    candidates
+        The precovery candidates.
+    astrometric_error
+        The astrometric error to assign to the candidates missing uncertainties.
+        Should at least contain a "default" key with a tuple of (ra_sigma_arcsec, dec_sigma_arcsec).
+
+    Returns
+    -------
+    candidates
+        The precovery candidates with the missing uncertainties assigned.
+    """
+    ra_sigma_arcsec = candidates.ra_sigma_arcsec.to_numpy(zero_copy_only=False)
+    dec_sigma_arcsec = candidates.dec_sigma_arcsec.to_numpy(zero_copy_only=False)
+    observatory_codes = candidates.obscode.to_numpy(zero_copy_only=False)
+
+    invalid_ra_sigma = np.isnan(ra_sigma_arcsec)
+    invalid_dec_sigma = np.isnan(dec_sigma_arcsec)
+    if np.any(invalid_ra_sigma):
+        invalid_observatory_codes = np.unique(observatory_codes[invalid_ra_sigma])
+        for code in invalid_observatory_codes:
+            print("Found missing 1-sigma RA uncertainties for observatory code:", code)
+            if code not in astrometric_errors:
+                ra_sigma_arcsec = np.where(
+                    observatory_codes == code,
+                    astrometric_errors["default"][0],
+                    ra_sigma_arcsec,
+                )
+            else:
+                ra_sigma_arcsec = np.where(
+                    observatory_codes == code,
+                    astrometric_errors[code][0],
+                    ra_sigma_arcsec,
+                )
+
+        candidates = candidates.set_column("ra_sigma_arcsec", pa.array(ra_sigma_arcsec))
+
+    if np.any(invalid_dec_sigma):
+        invalid_observatory_codes = np.unique(observatory_codes[invalid_dec_sigma])
+        for code in invalid_observatory_codes:
+            print("Found missing 1-sigma Dec uncertainties for observatory code:", code)
+            if code not in astrometric_errors:
+                dec_sigma_arcsec = np.where(
+                    observatory_codes == code,
+                    astrometric_errors["default"][1],
+                    dec_sigma_arcsec,
+                )
+            else:
+                dec_sigma_arcsec = np.where(
+                    observatory_codes == code,
+                    astrometric_errors[code][1],
+                    dec_sigma_arcsec,
+                )
+
+        candidates = candidates.set_column(
+            "dec_sigma_arcsec", pa.array(dec_sigma_arcsec)
+        )
+
+    return candidates
+
+
+def drop_coincident_candidates(
+    candidates: PrecoveryCandidatesQv,
+) -> PrecoveryCandidatesQv:
+    """
+    Drop coincident candidates from the precovery candidates. These are candidates that have the same
+    observation time as another candidate. The candidate with the lowest distance is kept.
+
+    Parameters
+    ----------
+    candidates
+        The precovery candidates.
+
+    Returns
+    -------
+    candidates
+        The precovery candidates with the coincident candidates dropped.
+    """
+    # Flatten the table so nested columns are dot-delimited at the top level
+    flattened_table = candidates.flattened_table()
+
+    # Add index to flattened table
+    flattened_table = flattened_table.add_column(
+        0, "index", pa.array(np.arange(len(flattened_table)))
+    )
+
+    # Sort by time, then distance, then obscode
+    flattened_table = flattened_table.sort_by(
+        [
+            ("time.days", "ascending"),
+            ("time.nanos", "ascending"),
+            ("distance_arcsec", "ascending"),
+        ]
+    )
+
+    # Group by orbit ID and observation time
+    indices = (
+        flattened_table.group_by(
+            ["time.days", "time.nanos"],
+            use_threads=False,
+        )
+        .aggregate([("index", "first")])
+        .column("index_first")
+    )
+
+    filtered = candidates.take(indices)
+    if filtered.fragmented():
+        filtered = qv.defragment(filtered)
+
+    return filtered
