@@ -2,6 +2,7 @@ from typing import Tuple
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import quivr as qv
 from adam_core.observers import Observers
 from adam_core.orbits import Orbits
@@ -231,3 +232,40 @@ def drop_coincident_candidates(
         filtered = qv.defragment(filtered)
 
     return filtered
+
+
+def identify_found_missed_and_new(
+    obs_ids_prev: pa.Array, obs_ids_iter: pa.Array
+) -> Tuple[list, list, list]:
+    """
+    Compares the previous observation IDs to current observation IDs and returns:
+    - The list of previous observation IDs that were found in the current iteration
+    - The list of previous observation IDs that were missed in the current iteration
+    - The list of new observation IDs that were not present in the previous iteration
+
+    Parameters
+    ----------
+    obs_ids_prev : pyarrow.Array
+        The previous observation IDs
+    obs_ids_iter : pyarrow.Array
+        The current observation IDs
+
+    Returns
+    -------
+    found : list
+        The list of previous observation IDs that were found in the current iteration
+    missed : list
+        The list of previous observation IDs that were missed in the current iteration
+    new: list
+        The list of new observation IDs that were not present in the previous iteration
+    """
+    if len(obs_ids_prev) == 0:
+        return [], [], obs_ids_iter.to_pylist()
+    found_mask = pc.is_in(obs_ids_prev, obs_ids_iter)
+    missed_mask = pc.invert(found_mask)
+    new_mask = pc.invert(pc.is_in(obs_ids_iter, obs_ids_prev))
+    return (
+        obs_ids_prev.filter(found_mask).to_pylist(),
+        obs_ids_prev.filter(missed_mask).to_pylist(),
+        obs_ids_iter.filter(new_mask).to_pylist(),
+    )
