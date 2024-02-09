@@ -74,6 +74,8 @@ def compute_search_window_and_tolerance(
 
     # Define the time range
     P = orbit.coordinates.to_keplerian().P[0]
+    if np.isnan(P) or np.isinf(P):
+        P = 365.25  # Default to 1 year if the period is not defined
     epoch_mjd = orbit.coordinates.time.rescale("utc").mjd().to_numpy()[0]
     mjd = np.linspace(epoch_mjd - P / 2, epoch_mjd + P / 2, steps, endpoint=True)
     time = Timestamp.from_mjd(mjd, scale="utc")
