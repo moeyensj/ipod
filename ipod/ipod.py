@@ -226,6 +226,8 @@ def ipod(
 
         # Drop any coincident candidates
         candidates = drop_coincident_candidates(candidates)
+        candidates = candidates.sort_by(["time.days", "time.nanos", "obscode"])
+
         if len(candidates) != num_candidates:
             logger.debug(
                 f"Removed {num_candidates - len(candidates)} coincident candidates."
@@ -236,9 +238,7 @@ def ipod(
         orbit_observations_iter = OrbitDeterminationObservations.from_kwargs(
             id=candidates.observation_id,
             coordinates=candidates.to_spherical_coordinates(),
-            observers=candidates.get_observers().sort_by(
-                ["coordinates.time.days", "coordinates.time.nanos", "code"]
-            ),
+            observers=candidates.get_observers(),
         )
 
         # The orbit solution may have changed so if we have any rejected observations
