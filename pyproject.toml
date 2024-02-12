@@ -29,6 +29,10 @@ classifiers = [
 
 dependencies = [
     "numpy",
+    "pyarrow>=14.0.0",
+    "ray[default]",
+    "thor @ git+https://github.com/moeyensj/thor.git@790e919b71edd862456c4d74c2c5793e0f1a2e4e#egg=thor",
+    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@a32c08049dfba89b3bbdbb013675c1d460b6a481#egg=precovery",
 ]
 
 [project.optional-dependencies]
