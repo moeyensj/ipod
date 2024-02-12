@@ -58,6 +58,7 @@ def ipod(
     max_mjd: Optional[float] = None,
     astrometric_errors: dict = {},
     database: Union[str, PrecoveryDatabase] = "",
+    datasets: Optional[set[str]] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ) -> Tuple[
@@ -214,7 +215,7 @@ def ipod(
             start_mjd=min_mjd_iter,
             end_mjd=max_mjd_iter,
             window_size=7,
-            # datasets=datasets, TODO
+            datasets=datasets,
         )
         candidates = candidates.sort_by(["time.days", "time.nanos", "obscode"])
         num_candidates = len(candidates)

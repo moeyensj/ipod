@@ -37,6 +37,7 @@ def ipod_worker(
     min_mjd: Optional[float] = None,
     max_mjd: Optional[float] = None,
     database: Union[str, PrecoveryDatabase] = "",
+    datasets: Optional[set[str]] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ) -> Tuple[
@@ -90,6 +91,7 @@ def ipod_worker(
             min_mjd=min_mjd,
             max_mjd=max_mjd,
             database=precovery_db,
+            datasets=datasets,
             propagator=propagator,
             propagator_kwargs=propagator_kwargs,
         )
@@ -133,6 +135,7 @@ def ipod_worker_remote(
     min_mjd: Optional[float] = None,
     max_mjd: Optional[float] = None,
     database_directory: str = "",
+    datasets: Optional[set[str]] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ):
@@ -164,6 +167,7 @@ def ipod_worker_remote(
         min_mjd=min_mjd,
         max_mjd=max_mjd,
         database=database,
+        datasets=datasets,
         propagator=propagator,
         propagator_kwargs=propagator_kwargs,
     )
@@ -189,6 +193,7 @@ def iterative_precovery_and_differential_correction(
     min_mjd: Optional[float] = None,
     max_mjd: Optional[float] = None,
     database_directory: str = "",
+    datasets: Optional[set[str]] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
     chunk_size: int = 10,
@@ -309,6 +314,7 @@ def iterative_precovery_and_differential_correction(
                     min_mjd=min_mjd,
                     max_mjd=max_mjd,
                     database_directory=database_directory,
+                    datasets=datasets,
                     propagator=propagator,
                     propagator_kwargs=propagator_kwargs,
                 )
@@ -407,6 +413,7 @@ def iterative_precovery_and_differential_correction(
                 min_mjd=min_mjd,
                 max_mjd=max_mjd,
                 database=database_directory,
+                datasets=datasets,
                 propagator=propagator,
                 propagator_kwargs=propagator_kwargs,
             )
