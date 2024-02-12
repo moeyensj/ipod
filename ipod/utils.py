@@ -48,6 +48,9 @@ def compute_search_window_and_tolerance(
     predicted ephemeris for a geocentric observer. The maximum uncertainty is then
     calculated at desired sigma-level.
 
+    For more eccentric orbits or orbits that are unbound, the period search is limited to 10 years
+    (+/- 5 years from orbit's epoch).
+
     For highly uncertain orbits, the time range where the uncertainty is less than
     the maximum tolerance may be empty.
 
@@ -76,7 +79,8 @@ def compute_search_window_and_tolerance(
     # Define the time range
     P = orbit.coordinates.to_keplerian().P[0]
     if np.isnan(P) or np.isinf(P):
-        P = 365.25  # Default to 1 year if the period is not defined
+        P = 10 * 365.25  # Default to 5 years if the period is not defined
+    P = np.minimum(P, 10 * 365.25)
     epoch_mjd = orbit.coordinates.time.rescale("utc").mjd().to_numpy()[0]
     mjd = np.linspace(epoch_mjd - P / 2, epoch_mjd + P / 2, steps, endpoint=True)
     time = Timestamp.from_mjd(mjd, scale="utc")
