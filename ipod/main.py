@@ -296,6 +296,11 @@ def iterative_precovery_and_differential_correction(
             observations = ray.get(observations_ref)
             logger.info("Placed observations in the object store.")
 
+        chunk_size = np.minimum(len(orbit_ids) // max_processes, chunk_size)
+        logger.info(
+            f"Distributing orbits in chunks of {chunk_size} to {max_processes} workers."
+        )
+
         futures = []
         for orbit_ids_indices in _iterate_chunk_indices(orbit_ids, chunk_size):
             futures.append(
