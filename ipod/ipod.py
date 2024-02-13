@@ -117,6 +117,7 @@ def ipod(
             "Maximum MJD is after the latest frame in the database. Setting to the latest frame."
         )
 
+    force_fit = False
     # If observations have been passed lets make sure that
     # the given orbit has been evaluated with the given observations
     if orbit_observations is not None:
@@ -146,6 +147,18 @@ def ipod(
             outlier=orbit_members_iter.outlier,
             solution=orbit_members_iter.solution,
         )
+
+        initial_reduced_chi2 = orbit_iter.reduced_chi2[0].as_py()
+        if initial_reduced_chi2 > rchi2_threshold:
+            # This can occur if the orbit was previously accepted with these
+            # observations at a higher reduced chi2 threshold than the one
+            # given to this function. In this case we will force a fit
+            # with the given observations to give this orbit a chance to improve.
+            logger.debug(
+                f"Initial reduced chi2 of {initial_reduced_chi2} "
+                f"is greater than the threshold of {rchi2_threshold}."
+            )
+            force_fit = True
 
         orbit_observations_iter = orbit_observations
         obs_ids_iter = orbit_observations.id
@@ -246,6 +259,12 @@ def ipod(
             max_mjd_iter = np.minimum(max_mjd_iter, max_mjd)
             logger.debug("Proposed search window end is after the maximum MJD.")
 
+        # if min_mjd_iter > max_mjd_iter:
+        #     logger.debug(
+        #         "Proposed search window start is after the proposed search window end."
+        #     )
+        #     break
+
         logger.debug(
             f"Running precovery search between {min_mjd_iter:.5f} and {max_mjd_iter:.5f} "
             f"[dt: {max_mjd_iter-min_mjd_iter:.5f}] with a {tolerance_iter:.3f} arcsecond tolerance..."
@@ -338,7 +357,7 @@ def ipod(
 
         # If no new observations were found, then lets increase the tolerance and jump to the next
         # iteration. There is no point in orbit fitting if no new observations were found.
-        if len(new) == 0:
+        if len(new) == 0 and not force_fit:
             tolerance_iter = update_tolerance(tolerance_iter)
             if tolerance_iter > max_tolerance:
                 logger.debug(
@@ -390,6 +409,8 @@ def ipod(
             max_iter=10,
             contamination_percentage=contamination_percentage,
         )
+        if force_fit:
+            force_fit = False
 
         if len(orbit_iter_fit) == 0:
             # If the orbit fit failed completely, then remove the newly added observations
