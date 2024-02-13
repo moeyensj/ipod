@@ -387,6 +387,7 @@ def ipod(
             rchi2_threshold=rchi2_threshold,
             min_obs=6,
             min_arc_length=1,
+            max_iter=10,
             contamination_percentage=contamination_percentage,
         )
 
