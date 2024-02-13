@@ -317,7 +317,19 @@ def ipod(
             search_summary_iter["num_candidates"] = num_candidates
 
         # Attempt to differentially correct the orbit given the new observations
-        contamination_percentage = (len(new) + 1) / num_candidates * 100
+        # If we have previous observations then we will use them to calculate
+        # the contamination percentage
+        if orbit_observations_prev is not None:
+            contamination_percentage = (len(new) + 1) / num_candidates * 100
+
+        # If we do not have previous observations then we will use a default
+        # maximum contamination percentage of 50%
+        else:
+            logger.debug(
+                "No previous observations. Running orbit fit with all new observations."
+            )
+            contamination_percentage = 50.0
+
         logger.debug(
             f"Running orbit fit with {len(new)} new observations "
             f"and a contamination percentage of {contamination_percentage:.2f}%..."
