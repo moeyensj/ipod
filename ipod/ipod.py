@@ -117,16 +117,12 @@ def ipod(
             "Maximum MJD is after the latest frame in the database. Setting to the latest frame."
         )
 
-    # Set running variables
-    orbit_prev = orbit
-    orbit_observations_prev = orbit_observations
-
     # If observations have been passed lets make sure that
     # the given orbit has been evaluated with the given observations
-    if orbit_observations_prev is not None:
+    if orbit_observations is not None:
         orbit_iter, orbit_members_iter = evaluate_orbits(
-            orbit_prev.to_orbits(),
-            orbit_observations_prev,
+            orbit.to_orbits(),
+            orbit_observations,
             prop,
         )
 
@@ -151,22 +147,23 @@ def ipod(
             solution=orbit_members_iter.solution,
         )
 
-        orbit_observations_iter = orbit_observations_prev
-        obs_ids_iter = orbit_observations_prev.id
+        orbit_observations_iter = orbit_observations
+        obs_ids_iter = orbit_observations.id
 
     else:
-        orbit_iter = orbit_prev
+        orbit_iter = orbit
         orbit_members_iter = FittedOrbitMembers.empty()
-        orbit_observations_iter = orbit_observations_prev
+        orbit_observations_iter = OrbitDeterminationObservations.empty()
         obs_ids_iter = pa.array([])
-
-    orbit_members_prev = orbit_members_iter
-    obs_ids_prev = obs_ids_iter
 
     # Start with a tolerance of 1 arcsecond
     tolerance_iter = 1
 
+    # Running list of observation IDs that have been rejected by OD
+    # or OD failures
     rejected_obs_ids: list[str] = []
+
+    # Running search summary
     search_summary_iter = {
         "orbit_id": orbit_iter.orbit_id[0].as_py(),
         "min_mjd": 0,
@@ -179,7 +176,14 @@ def ipod(
         "num_obs_prev": orbit_iter.num_obs[0].as_py(),
         "num_obs": orbit_iter.num_obs[0].as_py(),
     }
+
     for i in range(max_iter):
+        # Set running list of observation IDs that have been
+        # processed thus far. This includes observations which have been
+        # identifeid as outliers and rejected
+        obs_ids_prev = obs_ids_iter
+
+        logger.debug(f"Starting ipod iteration {i+1}...")
         if tolerance_iter > max_tolerance:
             logger.debug(
                 f"Maximum tolerance of {max_tolerance} arcseconds reached. Exiting."
@@ -187,7 +191,7 @@ def ipod(
             break
 
         # Compute the min and max observation times if they exist
-        if orbit_observations_iter is not None:
+        if len(orbit_observations_iter) > 0:
             min_search_mjd = (
                 orbit_observations_iter.coordinates.time.min().mjd()[0].as_py()
             )
@@ -272,9 +276,24 @@ def ipod(
             )
             num_candidates = len(candidates)
 
+        # Current set of observation IDs up for consideration
+        obs_ids_iter = candidates.observation_id
+
+        # Update the search summary
+        search_summary_iter["min_mjd"] = min_mjd_iter
+        search_summary_iter["max_mjd"] = max_mjd_iter
+        search_summary_iter["num_candidates"] = num_candidates
+
+        if len(candidates) < 6:
+            logger.debug(
+                "Insufficient candidates for orbit determination. Increasing tolerance."
+            )
+            tolerance_iter = update_tolerance(tolerance_iter)
+            continue
+
         # Convert candidates to OrbitDeterminationObservations
         orbit_observations_iter = OrbitDeterminationObservations.from_kwargs(
-            id=candidates.observation_id,
+            id=obs_ids_iter,
             coordinates=candidates.to_spherical_coordinates(),
             observers=candidates.get_observers(),
         )
@@ -312,15 +331,7 @@ def ipod(
                 )
                 search_summary_iter["num_rejected"] = len(rejected_obs_ids)
 
-        # Update the search summary
-        search_summary_iter["min_mjd"] = min_mjd_iter
-        search_summary_iter["max_mjd"] = max_mjd_iter
-        search_summary_iter["num_candidates"] = num_candidates
-
-        obs_ids_processed = pa.array(obs_ids_prev.to_pylist() + rejected_obs_ids)
-        found, missed, new = identify_found_missed_and_new(
-            obs_ids_processed, candidates.observation_id
-        )
+        found, missed, new = identify_found_missed_and_new(obs_ids_prev, obs_ids_iter)
         logger.debug(f"Found {len(found)} observations from the previous iteration.")
         logger.debug(f"Missed {len(missed)} observations from the previous iteration.")
         logger.debug(f"Found {len(new)} new observations.")
@@ -329,9 +340,6 @@ def ipod(
         # iteration. There is no point in orbit fitting if no new observations were found.
         if len(new) == 0:
             tolerance_iter = update_tolerance(tolerance_iter)
-            obs_ids_prev = obs_ids_iter
-            orbit_prev = orbit_iter
-            orbit_members_prev = orbit_members_iter
             if tolerance_iter > max_tolerance:
                 logger.debug(
                     f"Maximum tolerance of {max_tolerance} arcseconds reached. Exiting."
@@ -356,8 +364,10 @@ def ipod(
         # Attempt to differentially correct the orbit given the new observations
         # If we have previous observations then we will use them to calculate
         # the contamination percentage
-        if orbit_observations_prev is not None:
-            contamination_percentage = (len(new) + 1) / num_candidates * 100
+        if len(orbit_observations_iter) > 0:
+            contamination_percentage = np.minimum(
+                (len(new) + 1) / num_candidates * 100, 100
+            )
 
         # If we do not have previous observations then we will use a default
         # maximum contamination percentage of 50%
@@ -398,10 +408,6 @@ def ipod(
                     "Orbit fit failed. Removing newly added observations and adding "
                     "them to the rejected observations list."
                 )
-
-            orbit_iter = orbit_prev
-            orbit_members_iter = orbit_members_prev
-            orbit_observations_iter = orbit_observations_prev
 
             # Skip to the next iteration since the best-fit orbit has not changed
             # since the previous iteration
@@ -466,12 +472,6 @@ def ipod(
                     f"Increasing the tolerance to {tolerance_iter}."
                 )
 
-        # Update the running variables
-        obs_ids_prev = obs_ids_iter
-        orbit_prev = orbit_iter
-        orbit_members_prev = orbit_members_iter
-        orbit_observations_prev = orbit_observations_iter
-
     if i == max_iter - 1:
         logger.debug("Maximum number of iterations reached. Exiting.")
 
@@ -480,6 +480,15 @@ def ipod(
             f"Final reduced chi2 of {orbit_iter.reduced_chi2[0].as_py()} "
             f"is greater than the threshold of {rchi2_threshold}."
         )
+        return (
+            FittedOrbits.empty(),
+            FittedOrbitMembers.empty(),
+            OrbitDeterminationObservations.empty(),
+            SearchSummary.empty(),
+        )
+
+    if len(orbit_observations_iter) == 0:
+        logger.debug("No observations found. Exiting.")
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),

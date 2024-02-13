@@ -296,7 +296,9 @@ def iterative_precovery_and_differential_correction(
             observations = ray.get(observations_ref)
             logger.info("Placed observations in the object store.")
 
-        chunk_size = np.minimum(len(orbit_ids) // max_processes, chunk_size)
+        chunk_size = np.minimum(
+            np.ceil(len(orbit_ids) / max_processes).astype(int), chunk_size
+        )
         logger.info(
             f"Distributing orbits in chunks of {chunk_size} to {max_processes} workers."
         )
