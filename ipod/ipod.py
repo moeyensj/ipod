@@ -80,6 +80,43 @@ def ipod(
     else:
         precovery_db = database
 
+    # Get the mjd bounds of the frames in the database
+    database_min_mjd, database_max_mjd = precovery_db.frames.idx.mjd_bounds(
+        datasets=datasets
+    )
+    logger.debug(f"Database MJD range: {database_min_mjd:.5f} - {database_max_mjd:.5f}")
+    if database_min_mjd is None and database_max_mjd is None:
+        if datasets is not None:
+            logger.debug(f"No frames for datasets {datasets} in the database.")
+        else:
+            logger.debug("No frames in the database.")
+        return (
+            FittedOrbits.empty(),
+            FittedOrbitMembers.empty(),
+            OrbitDeterminationObservations.empty(),
+            SearchSummary.empty(),
+        )
+
+    # If the min and max MJD are not given then set them to the min and max MJD
+    # of the frames in the database
+    if min_mjd is None:
+        min_mjd = database_min_mjd
+    if max_mjd is None:
+        max_mjd = database_max_mjd
+
+    # If the min and max MJD are outside the bounds of the frames in the database
+    # then set them to the min and max MJD of the frames in the database
+    if min_mjd < database_min_mjd:
+        min_mjd = database_min_mjd
+        logger.debug(
+            "Minimum MJD is before the earliest frame in the database. Setting to the earliest frame."
+        )
+    if max_mjd > database_max_mjd:
+        max_mjd = database_max_mjd
+        logger.debug(
+            "Maximum MJD is after the latest frame in the database. Setting to the latest frame."
+        )
+
     # Set running variables
     orbit_prev = orbit
     orbit_observations_prev = orbit_observations
