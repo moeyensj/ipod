@@ -16,9 +16,8 @@ from adam_core.ray_cluster import initialize_use_ray
 from precovery.precovery_db import PrecoveryDatabase
 from thor.observations import Observations
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
-from thor.utils.quivr import drop_duplicates
 
-from .ipod import SearchSummary, ipod
+from .ipod import PrecoveryCandidates, SearchSummary, ipod
 
 logger = logging.getLogger("ipod")
 
@@ -40,13 +39,11 @@ def ipod_worker(
     datasets: Optional[set[str]] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
-) -> Tuple[
-    FittedOrbits, FittedOrbitMembers, OrbitDeterminationObservations, SearchSummary
-]:
+) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
 
     ipod_orbits = FittedOrbits.empty()
     ipod_orbits_members = FittedOrbitMembers.empty()
-    ipod_orbits_observations = OrbitDeterminationObservations.empty()
+    ipod_precovery_candidates = PrecoveryCandidates.empty()
     ipod_summary = SearchSummary.empty()
 
     if not isinstance(database, PrecoveryDatabase):
@@ -79,7 +76,7 @@ def ipod_worker(
         else:
             orbit_observations = None
 
-        ipod_orbit, ipod_orbit_members, ipod_orbit_observations, summary = ipod(
+        ipod_orbit, ipod_orbit_members, ipod_candidates_i, summary = ipod(
             orbit,
             orbit_observations=orbit_observations,
             max_tolerance=max_tolerance,
@@ -102,21 +99,16 @@ def ipod_worker(
         ipod_orbits_members = qv.concatenate([ipod_orbits_members, ipod_orbit_members])
         if ipod_orbits_members.fragmented():
             ipod_orbits_members = qv.defragment(ipod_orbits_members)
-        ipod_orbits_observations = qv.concatenate(
-            [ipod_orbits_observations, ipod_orbit_observations]
+        ipod_precovery_candidates = qv.concatenate(
+            [ipod_precovery_candidates, ipod_candidates_i]
         )
-        if ipod_orbits_observations.fragmented():
-            ipod_orbits_observations = qv.defragment(ipod_orbits_observations)
-
-        ipod_orbits_observations = drop_duplicates(
-            ipod_orbits_observations, subset=["id"], keep="first"
-        )
-
+        if ipod_precovery_candidates.fragmented():
+            ipod_precovery_candidates = qv.defragment(ipod_precovery_candidates)
         ipod_summary = qv.concatenate([ipod_summary, summary])
         if ipod_summary.fragmented():
             ipod_summary = qv.defragment(ipod_summary)
 
-    return ipod_orbits, ipod_orbits_members, ipod_orbits_observations, ipod_summary
+    return ipod_orbits, ipod_orbits_members, ipod_precovery_candidates, ipod_summary
 
 
 @ray.remote
@@ -151,7 +143,7 @@ def ipod_worker_remote(
     (
         ipod_orbits,
         ipod_orbits_members,
-        ipod_orbits_observations,
+        ipod_precovery_candidates,
         ipod_summary,
     ) = ipod_worker(
         orbit_id_chunk,
@@ -174,7 +166,7 @@ def ipod_worker_remote(
 
     database.frames.close()
 
-    return ipod_orbits, ipod_orbits_members, ipod_orbits_observations, ipod_summary
+    return ipod_orbits, ipod_orbits_members, ipod_precovery_candidates, ipod_summary
 
 
 ipod_worker_remote.options(num_cpus=1, num_returns=1)
@@ -198,9 +190,7 @@ def iterative_precovery_and_differential_correction(
     propagator_kwargs: dict = {},
     chunk_size: int = 10,
     max_processes: Optional[int] = 1,
-) -> Tuple[
-    FittedOrbits, FittedOrbitMembers, OrbitDeterminationObservations, SearchSummary
-]:
+) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
     """
     Perform iterative precovery and differential correction on the input orbits.
 
@@ -255,7 +245,7 @@ def iterative_precovery_and_differential_correction(
         return (
             od_orbits,
             od_orbit_members,
-            OrbitDeterminationObservations.empty(),
+            PrecoveryCandidates.empty(),
             SearchSummary.empty(),
         )
 
@@ -263,7 +253,7 @@ def iterative_precovery_and_differential_correction(
 
     ipod_orbits = FittedOrbits.empty()
     ipod_orbit_members = FittedOrbitMembers.empty()
-    ipod_orbits_observations = OrbitDeterminationObservations.empty()
+    ipod_precovery_candidates = PrecoveryCandidates.empty()
     ipod_summary = SearchSummary.empty()
 
     if max_processes is None:
@@ -332,7 +322,7 @@ def iterative_precovery_and_differential_correction(
                 (
                     ipod_orbits_chunk,
                     ipod_orbit_members_chunk,
-                    ipod_orbits_observations_chunk,
+                    ipod_precovery_candidates_chunk,
                     ipod_summary_chunk,
                 ) = ray.get(finished[0])
 
@@ -346,15 +336,11 @@ def iterative_precovery_and_differential_correction(
                 if ipod_orbit_members.fragmented():
                     ipod_orbit_members = qv.defragment(ipod_orbit_members)
 
-                ipod_orbits_observations = qv.concatenate(
-                    [ipod_orbits_observations, ipod_orbits_observations_chunk]
+                ipod_precovery_candidates = qv.concatenate(
+                    [ipod_precovery_candidates, ipod_precovery_candidates_chunk]
                 )
-                if ipod_orbits_observations.fragmented():
-                    ipod_orbits_observations = qv.defragment(ipod_orbits_observations)
-
-                ipod_orbits_observations = drop_duplicates(
-                    ipod_orbits_observations, subset=["id"], keep="first"
-                )
+                if ipod_precovery_candidates.fragmented():
+                    ipod_precovery_candidates = qv.defragment(ipod_precovery_candidates)
 
                 ipod_summary = qv.concatenate([ipod_summary, ipod_summary_chunk])
                 if ipod_summary.fragmented():
@@ -365,7 +351,7 @@ def iterative_precovery_and_differential_correction(
             (
                 ipod_orbits_chunk,
                 ipod_orbit_members_chunk,
-                ipod_orbits_observations_chunk,
+                ipod_precovery_candidates_chunk,
                 ipod_summary_chunk,
             ) = ray.get(finished[0])
 
@@ -379,15 +365,11 @@ def iterative_precovery_and_differential_correction(
             if ipod_orbit_members.fragmented():
                 ipod_orbit_members = qv.defragment(ipod_orbit_members)
 
-            ipod_orbits_observations = qv.concatenate(
-                [ipod_orbits_observations, ipod_orbits_observations_chunk]
+            ipod_precovery_candidates = qv.concatenate(
+                [ipod_precovery_candidates, ipod_precovery_candidates_chunk]
             )
-            if ipod_orbits_observations.fragmented():
-                ipod_orbits_observations = qv.defragment(ipod_orbits_observations)
-
-            ipod_orbits_observations = drop_duplicates(
-                ipod_orbits_observations, subset=["id"], keep="first"
-            )
+            if ipod_precovery_candidates.fragmented():
+                ipod_precovery_candidates = qv.defragment(ipod_precovery_candidates)
 
             ipod_summary = qv.concatenate([ipod_summary, ipod_summary_chunk])
             if ipod_summary.fragmented():
@@ -404,7 +386,7 @@ def iterative_precovery_and_differential_correction(
             (
                 ipod_orbits_chunk,
                 ipod_orbit_members_chunk,
-                ipod_orbits_observations_chunk,
+                ipod_precovery_candidates_chunk,
                 ipod_summary_chunk,
             ) = ipod_worker(
                 orbit_ids_chunk,
@@ -432,15 +414,11 @@ def iterative_precovery_and_differential_correction(
             )
             if ipod_orbit_members.fragmented():
                 ipod_orbit_members = qv.defragment(ipod_orbit_members)
-            ipod_orbits_observations = qv.concatenate(
-                [ipod_orbits_observations, ipod_orbits_observations_chunk]
+            ipod_precovery_candidates = qv.concatenate(
+                [ipod_precovery_candidates, ipod_precovery_candidates_chunk]
             )
-            if ipod_orbits_observations.fragmented():
-                ipod_orbits_observations = qv.defragment(ipod_orbits_observations)
-
-            ipod_orbits_observations = drop_duplicates(
-                ipod_orbits_observations, subset=["id"], keep="first"
-            )
+            if ipod_precovery_candidates.fragmented():
+                ipod_precovery_candidates = qv.defragment(ipod_precovery_candidates)
 
             ipod_summary = qv.concatenate([ipod_summary, ipod_summary_chunk])
             if ipod_summary.fragmented():
@@ -454,4 +432,4 @@ def iterative_precovery_and_differential_correction(
         f"Iterative precovery and differential correction completed in {time_end - time_start:.3f} seconds."
     )
 
-    return ipod_orbits, ipod_orbit_members, ipod_orbits_observations, ipod_summary
+    return ipod_orbits, ipod_orbit_members, ipod_precovery_candidates, ipod_summary

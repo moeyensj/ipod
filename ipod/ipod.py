@@ -11,6 +11,7 @@ from adam_core.orbit_determination import (
 )
 from adam_core.orbits import Orbits
 from adam_core.propagator import PYOORB, Propagator
+from precovery.precovery_db import PrecoveryCandidatesQv as PrecoveryCandidates
 from precovery.precovery_db import PrecoveryDatabase
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 from thor.orbits.od import od
@@ -61,9 +62,7 @@ def ipod(
     datasets: Optional[set[str]] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
-) -> Tuple[
-    FittedOrbits, FittedOrbitMembers, OrbitDeterminationObservations, SearchSummary
-]:
+) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
 
     # Initialize the propagator
     prop = propagator(**propagator_kwargs)
@@ -93,7 +92,7 @@ def ipod(
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
-            OrbitDeterminationObservations.empty(),
+            PrecoveryCandidates.empty(),
             SearchSummary.empty(),
         )
 
@@ -175,6 +174,7 @@ def ipod(
     # Running list of observation IDs that have been rejected by OD
     # or OD failures
     rejected_obs_ids: list[str] = []
+    candidates_iter = PrecoveryCandidates.empty()
 
     # Running search summary
     search_summary_iter = {
@@ -193,7 +193,7 @@ def ipod(
     for i in range(max_iter):
         # Set running list of observation IDs that have been
         # processed thus far. This includes observations which have been
-        # identifeid as outliers and rejected
+        # identified as outliers and rejected
         obs_ids_prev = obs_ids_iter
 
         logger.debug(f"Starting ipod iteration {i+1}...")
@@ -269,7 +269,7 @@ def ipod(
             f"Running precovery search between {min_mjd_iter:.5f} and {max_mjd_iter:.5f} "
             f"[dt: {max_mjd_iter-min_mjd_iter:.5f}] with a {tolerance_iter:.3f} arcsecond tolerance..."
         )
-        candidates, frame_candidates = precovery_db.precover(
+        candidates_iter, frame_candidates = precovery_db.precover(
             orbit,
             tolerance=tolerance_iter / 3600,
             start_mjd=min_mjd_iter,
@@ -277,33 +277,39 @@ def ipod(
             window_size=7,
             datasets=datasets,
         )
-        candidates = candidates.sort_by(["time.days", "time.nanos", "obscode"])
-        num_candidates = len(candidates)
+        candidates_iter = candidates_iter.sort_by(
+            ["time.days", "time.nanos", "obscode"]
+        )
+        num_candidates = len(candidates_iter)
         logger.debug(f"Found {num_candidates} potential precovery observations.")
 
         # Check if the candidates contain any missing uncertainties. If they do then
         # assign a default uncertainty to them.
-        candidates = check_candidates_astrometric_errors(candidates, astrometric_errors)
+        candidates_iter = check_candidates_astrometric_errors(
+            candidates_iter, astrometric_errors
+        )
 
         # Drop any coincident candidates
-        candidates = drop_coincident_candidates(candidates)
-        candidates = candidates.sort_by(["time.days", "time.nanos", "obscode"])
+        candidates_iter = drop_coincident_candidates(candidates_iter)
+        candidates_iter = candidates_iter.sort_by(
+            ["time.days", "time.nanos", "obscode"]
+        )
 
-        if len(candidates) != num_candidates:
+        if len(candidates_iter) != num_candidates:
             logger.debug(
-                f"Removed {num_candidates - len(candidates)} coincident candidates."
+                f"Removed {num_candidates - len(candidates_iter)} coincident candidates."
             )
-            num_candidates = len(candidates)
+            num_candidates = len(candidates_iter)
 
         # Current set of observation IDs up for consideration
-        obs_ids_iter = candidates.observation_id
+        obs_ids_iter = candidates_iter.observation_id
 
         # Update the search summary
         search_summary_iter["min_mjd"] = min_mjd_iter
         search_summary_iter["max_mjd"] = max_mjd_iter
         search_summary_iter["num_candidates"] = num_candidates
 
-        if len(candidates) < 6:
+        if len(candidates_iter) < 6:
             logger.debug(
                 "Insufficient candidates for orbit determination. Increasing tolerance."
             )
@@ -313,8 +319,8 @@ def ipod(
         # Convert candidates to OrbitDeterminationObservations
         orbit_observations_iter = OrbitDeterminationObservations.from_kwargs(
             id=obs_ids_iter,
-            coordinates=candidates.to_spherical_coordinates(),
-            observers=candidates.get_observers(),
+            coordinates=candidates_iter.to_spherical_coordinates(),
+            observers=candidates_iter.get_observers(),
         )
 
         # The orbit solution may have changed so if we have any rejected observations
@@ -459,6 +465,11 @@ def ipod(
         obs_ids_iter = orbit_observations_iter.id
         logger.debug(f"Found {len(outlier_ids)} outliers.")
 
+        # Update candidates iter to reflect the new set of observations
+        candidates_iter = candidates_iter.apply_mask(
+            pc.is_in(candidates_iter.observation_id, orbit_observations_iter.id)
+        )
+
         # Update the rest of the search summary
         search_summary_iter["num_accepted"] = len(obs_ids_iter)
         search_summary_iter["num_rejected"] = len(rejected_obs_ids)
@@ -483,7 +494,7 @@ def ipod(
                 return (
                     orbit_iter,
                     orbit_members_iter,
-                    orbit_observations_iter,
+                    candidates_iter,
                     search_summary,
                 )
 
@@ -505,7 +516,7 @@ def ipod(
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
-            OrbitDeterminationObservations.empty(),
+            PrecoveryCandidates.empty(),
             SearchSummary.empty(),
         )
 
@@ -514,11 +525,16 @@ def ipod(
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
-            OrbitDeterminationObservations.empty(),
+            PrecoveryCandidates.empty(),
             SearchSummary.empty(),
         )
+
+    # Filter the candidates to only include observations that were used in the final orbit fit
+    candidates = candidates_iter.apply_mask(
+        pc.is_in(candidates_iter.observation_id, orbit_members_iter.obs_id)
+    )
 
     search_summary = SearchSummary.from_kwargs(
         **{k: [v] for k, v in search_summary_iter.items()}
     )
-    return orbit_iter, orbit_members_iter, orbit_observations_iter, search_summary
+    return orbit_iter, orbit_members_iter, candidates, search_summary
