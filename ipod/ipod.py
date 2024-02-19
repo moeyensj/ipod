@@ -270,7 +270,7 @@ def ipod(
             f"[dt: {max_mjd_iter-min_mjd_iter:.5f}] with a {tolerance_iter:.3f} arcsecond tolerance..."
         )
         candidates_iter, frame_candidates = precovery_db.precover(
-            orbit,
+            orbit_iter.to_orbits(),
             tolerance=tolerance_iter / 3600,
             start_mjd=min_mjd_iter,
             end_mjd=max_mjd_iter,
