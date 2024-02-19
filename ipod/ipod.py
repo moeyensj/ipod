@@ -244,11 +244,16 @@ def ipod(
         # maximum search window to the entire observation time range
         if np.isnan(min_mjd_iter) or np.isnan(max_mjd_iter):
             logger.debug(
-                "Orbit's on-sky uncertainity already exceeds the maximum tolerance. "
-                f"Setting search window to +-{delta_time} and tolerance to {max_tolerance:.3f}."
+                "Orbit's on-sky uncertainty already exceeds the maximum tolerance. "
+                f"Setting search window to +-{delta_time} and tolerance to {tolerance_iter:.3f}."
             )
             min_mjd_iter = min_search_mjd - delta_time
             max_mjd_iter = max_search_mjd + delta_time
+
+            # If we are setting the search window with a default tolerance then we should
+            # force a fit with the given observations (if no new observations are found
+            # in this iteration) to give this orbit a chance to improve.
+            force_fit = True
 
         # If the search window is outside the minimum and maximum MJD, adjust the search window
         # to be within the minimum and maximum MJD
