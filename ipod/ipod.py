@@ -487,7 +487,11 @@ def ipod(
         ):
             # If the observations have not changed since the previous iteration, lets
             # try increasing the search window and tolerance
-            if min_mjd == min_mjd_iter and max_mjd == max_mjd_iter and i > 0:
+            if (
+                min_mjd == min_mjd_iter
+                and max_mjd == max_mjd_iter
+                and tolerance_iter >= max_tolerance
+            ):
                 logger.debug(
                     "Observations have not changed since the previous iteration "
                     "and the search window and tolerance have not changed. Exiting."
