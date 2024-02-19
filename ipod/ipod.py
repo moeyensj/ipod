@@ -279,7 +279,7 @@ def ipod(
             tolerance=tolerance_iter / 3600,
             start_mjd=min_mjd_iter,
             end_mjd=max_mjd_iter,
-            window_size=7,
+            window_size=1,
             datasets=datasets,
         )
         candidates_iter = candidates_iter.sort_by(
