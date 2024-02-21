@@ -416,9 +416,13 @@ def ipod(
             orbit_observations_iter,
             rchi2_threshold=rchi2_threshold,
             min_obs=6,
-            min_arc_length=1,
-            max_iter=10,
+            min_arc_length=1.0,
             contamination_percentage=contamination_percentage,
+            delta=1e-8,
+            max_iter=10,
+            method="central",
+            propagator=propagator,
+            propagator_kwargs=propagator_kwargs,
         )
         if force_fit:
             force_fit = False
