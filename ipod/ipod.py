@@ -212,6 +212,7 @@ def ipod(
         "num_obs": 0,
     }
 
+    failed_corrections = 0
     for i in range(max_iter):
         # Update the running list of processed observation IDs
         processed_obs_ids.update(obs_ids_iter.to_pylist())
@@ -272,8 +273,12 @@ def ipod(
 
             # If we are setting the search window with a default tolerance then we should
             # force a fit with the given observations (if no new observations are found
-            # in this iteration) to give this orbit a chance to improve.
-            force_fit = True
+            # in this iteration) to give this orbit a chance to improve. We will limit it
+            # to 3 failed corrections before forcing a fit.
+            if failed_corrections < 3:
+                force_fit = True
+            else:
+                force_fit = False
 
         # If the search window is outside the minimum and maximum MJD, adjust the search window
         # to be within the minimum and maximum MJD
@@ -477,6 +482,7 @@ def ipod(
             # code did its best job at removing the outliers but that it still failed
             # despite its best efforts. The rejected observations can still be re-accepted
             # in a later iteration if their chi2 is less than the reconsider_chi2.
+            failed_corrections += 1
             logger.debug(
                 "Orbit fit failed. Removing newly added observations and adding "
                 "them to the rejected observations list."
@@ -494,6 +500,7 @@ def ipod(
             search_summary_iter["num_rejected"] = len(rejected_obs_ids)
             continue
         else:
+            failed_corrections = 0
             orbit_iter = orbit_iter_fit
             orbit_members_iter = orbit_members_iter_fit
 
