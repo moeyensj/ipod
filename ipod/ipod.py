@@ -121,6 +121,7 @@ def ipod(
     # If observations have been passed lets make sure that
     # the given orbit has been evaluated with the given observations
     if orbit_observations is not None:
+        # Evaluate the orbit with the given observations
         orbit_iter, orbit_members_iter = evaluate_orbits(
             orbit.to_orbits(),
             orbit_observations,
@@ -148,20 +149,36 @@ def ipod(
             solution=orbit_members_iter.solution,
         )
 
-        initial_reduced_chi2 = orbit_iter.reduced_chi2[0].as_py()
-        if initial_reduced_chi2 > rchi2_threshold:
-            # This can occur if the orbit was previously accepted with these
-            # observations at a higher reduced chi2 threshold than the one
-            # given to this function. In this case we will force a fit
-            # with the given observations to give this orbit a chance to improve.
+        # Now fit the orbit with the given observations so we make sure we have
+        # an accurate orbit to start with
+        orbit_iter_fit, orbit_members_iter_fit = od(
+            orbit_iter,
+            orbit_observations,
+            rchi2_threshold=rchi2_threshold,
+            min_obs=6,
+            min_arc_length=1.0,
+            contamination_percentage=0.0,
+            delta=1e-8,
+            max_iter=5,
+            method="central",
+            propagator=propagator,
+            propagator_kwargs=propagator_kwargs,
+        )
+        if len(orbit_iter_fit) == 0:
             logger.debug(
-                f"Initial reduced chi2 of {initial_reduced_chi2} "
-                f"is greater than the threshold of {rchi2_threshold}."
+                "Initial orbit fit with provided observations failed. "
+                "Proceeding with previous orbit and ignoring provided observations."
             )
-            force_fit = True
+            orbit_iter = orbit
+            orbit_members_iter = FittedOrbitMembers.empty()
+            orbit_observations_iter = OrbitDeterminationObservations.empty()
+            obs_ids_iter = pa.array([])
 
-        orbit_observations_iter = orbit_observations
-        obs_ids_iter = orbit_observations.id
+        else:
+            orbit_iter = orbit_iter_fit
+            orbit_members_iter = orbit_members_iter_fit
+            orbit_observations_iter = orbit_observations
+            obs_ids_iter = orbit_observations_iter.id
 
     else:
         orbit_iter = orbit
@@ -267,12 +284,6 @@ def ipod(
             max_mjd_iter = np.minimum(max_mjd_iter, max_mjd)
             logger.debug("Proposed search window end is after the maximum MJD.")
 
-        # if min_mjd_iter > max_mjd_iter:
-        #     logger.debug(
-        #         "Proposed search window start is after the proposed search window end."
-        #     )
-        #     break
-
         logger.debug(
             f"Running precovery search between {min_mjd_iter:.5f} and {max_mjd_iter:.5f} "
             f"[dt: {max_mjd_iter-min_mjd_iter:.5f}] with a {tolerance_iter:.3f} arcsecond tolerance..."
@@ -308,6 +319,21 @@ def ipod(
                 f"Removed {num_candidates - len(candidates_iter)} coincident candidates."
             )
             num_candidates = len(candidates_iter)
+
+        # This only occurs if we were given input observations
+        if i == 0 and len(processed_obs_ids) > 0:
+            # Check if the candidates contain any observations that were previously
+            # given as input observations. If they do then update the search summary
+            # number of accepted observations
+            found_obs_id_prev, _, _ = identify_found_missed_and_new(
+                pa.array(list(processed_obs_ids)), candidates_iter.observation_id
+            )
+            search_summary_iter["num_accepted"] = len(found_obs_id_prev)
+            search_summary_iter["arc_length"] = (
+                candidates_iter.time.max().mjd()[0].as_py()
+                - candidates_iter.time.min().mjd()[0].as_py()
+            )
+            search_summary_iter["num_obs"] = len(found_obs_id_prev)
 
         # Current set of observation IDs up for consideration
         obs_ids_iter = candidates_iter.observation_id
