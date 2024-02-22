@@ -589,14 +589,8 @@ def ipod(
                     f"Increasing the tolerance to {tolerance_iter}."
                 )
 
-    if i == max_iter - 1:
-        logger.debug("Maximum number of iterations reached. Exiting.")
-
-    if orbit_iter.reduced_chi2[0].as_py() > rchi2_threshold:
-        logger.debug(
-            f"Final reduced chi2 of {orbit_iter.reduced_chi2[0].as_py()} "
-            f"is greater than the threshold of {rchi2_threshold}."
-        )
+    if len(orbit_members_iter) == 0:
+        logger.debug("No valid observation found. Exiting.")
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
@@ -604,8 +598,11 @@ def ipod(
             SearchSummary.empty(),
         )
 
-    if len(orbit_observations_iter) == 0:
-        logger.debug("No observations found. Exiting.")
+    if orbit_iter.reduced_chi2[0].as_py() > rchi2_threshold:
+        logger.debug(
+            f"Final reduced chi2 of {orbit_iter.reduced_chi2[0].as_py()} "
+            f"is greater than the threshold of {rchi2_threshold}."
+        )
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
