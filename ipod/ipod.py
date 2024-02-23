@@ -5,6 +5,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
+from adam_core.coordinates.residuals import calculate_reduced_chi2
 from adam_core.orbit_determination import (
     OrbitDeterminationObservations,
     evaluate_orbits,
@@ -120,6 +121,7 @@ def ipod(
     # If observations have been passed lets make sure that
     # the given orbit has been evaluated with the given observations
     if orbit_observations is not None:
+        # Evaluate the orbit with the given observations
         orbit_iter, orbit_members_iter = evaluate_orbits(
             orbit.to_orbits(),
             orbit_observations,
@@ -147,20 +149,36 @@ def ipod(
             solution=orbit_members_iter.solution,
         )
 
-        initial_reduced_chi2 = orbit_iter.reduced_chi2[0].as_py()
-        if initial_reduced_chi2 > rchi2_threshold:
-            # This can occur if the orbit was previously accepted with these
-            # observations at a higher reduced chi2 threshold than the one
-            # given to this function. In this case we will force a fit
-            # with the given observations to give this orbit a chance to improve.
+        # Now fit the orbit with the given observations so we make sure we have
+        # an accurate orbit to start with
+        orbit_iter_fit, orbit_members_iter_fit = od(
+            orbit_iter,
+            orbit_observations,
+            rchi2_threshold=rchi2_threshold,
+            min_obs=6,
+            min_arc_length=1.0,
+            contamination_percentage=0.0,
+            delta=1e-8,
+            max_iter=5,
+            method="central",
+            propagator=propagator,
+            propagator_kwargs=propagator_kwargs,
+        )
+        if len(orbit_iter_fit) == 0:
             logger.debug(
-                f"Initial reduced chi2 of {initial_reduced_chi2} "
-                f"is greater than the threshold of {rchi2_threshold}."
+                "Initial orbit fit with provided observations failed. "
+                "Proceeding with previous orbit and ignoring provided observations."
             )
-            force_fit = True
+            orbit_iter = orbit
+            orbit_members_iter = FittedOrbitMembers.empty()
+            orbit_observations_iter = OrbitDeterminationObservations.empty()
+            obs_ids_iter = pa.array([])
 
-        orbit_observations_iter = orbit_observations
-        obs_ids_iter = orbit_observations.id
+        else:
+            orbit_iter = orbit_iter_fit
+            orbit_members_iter = orbit_members_iter_fit
+            orbit_observations_iter = orbit_observations
+            obs_ids_iter = orbit_observations_iter.id
 
     else:
         orbit_iter = orbit
@@ -173,7 +191,11 @@ def ipod(
 
     # Running list of observation IDs that have been rejected by OD
     # or OD failures
-    rejected_obs_ids: list[str] = []
+    rejected_obs_ids: set[str] = set()
+    # Track the observation IDs that have been processed. This list
+    # will only ever grow as more observations are found and tested
+    # against the orbit
+    processed_obs_ids: set[str] = set()
     candidates_iter = PrecoveryCandidates.empty()
 
     # Running search summary
@@ -185,16 +207,15 @@ def ipod(
         "num_accepted": 0,
         "num_rejected": 0,
         "arc_length_prev": orbit_iter.arc_length[0].as_py(),
-        "arc_length": orbit_iter.arc_length[0].as_py(),
+        "arc_length": 0,
         "num_obs_prev": orbit_iter.num_obs[0].as_py(),
-        "num_obs": orbit_iter.num_obs[0].as_py(),
+        "num_obs": 0,
     }
 
+    failed_corrections = 0
     for i in range(max_iter):
-        # Set running list of observation IDs that have been
-        # processed thus far. This includes observations which have been
-        # identified as outliers and rejected
-        obs_ids_prev = obs_ids_iter
+        # Update the running list of processed observation IDs
+        processed_obs_ids.update(obs_ids_iter.to_pylist())
 
         logger.debug(f"Starting ipod iteration {i+1}...")
         if tolerance_iter > max_tolerance:
@@ -252,8 +273,12 @@ def ipod(
 
             # If we are setting the search window with a default tolerance then we should
             # force a fit with the given observations (if no new observations are found
-            # in this iteration) to give this orbit a chance to improve.
-            force_fit = True
+            # in this iteration) to give this orbit a chance to improve. We will limit it
+            # to 3 failed corrections before forcing a fit.
+            if failed_corrections < 3:
+                force_fit = True
+            else:
+                force_fit = False
 
         # If the search window is outside the minimum and maximum MJD, adjust the search window
         # to be within the minimum and maximum MJD
@@ -263,12 +288,6 @@ def ipod(
         if max_mjd is not None and max_mjd_iter is not None:
             max_mjd_iter = np.minimum(max_mjd_iter, max_mjd)
             logger.debug("Proposed search window end is after the maximum MJD.")
-
-        # if min_mjd_iter > max_mjd_iter:
-        #     logger.debug(
-        #         "Proposed search window start is after the proposed search window end."
-        #     )
-        #     break
 
         logger.debug(
             f"Running precovery search between {min_mjd_iter:.5f} and {max_mjd_iter:.5f} "
@@ -306,13 +325,28 @@ def ipod(
             )
             num_candidates = len(candidates_iter)
 
+        # This only occurs if we were given input observations
+        if i == 0 and len(processed_obs_ids) > 0:
+            # Check if the candidates contain any observations that were previously
+            # given as input observations. If they do then update the search summary
+            # number of accepted observations
+            found_obs_id_prev, _, _ = identify_found_missed_and_new(
+                pa.array(list(processed_obs_ids)), candidates_iter.observation_id
+            )
+            search_summary_iter["num_accepted"] = len(found_obs_id_prev)
+            search_summary_iter["arc_length"] = (
+                candidates_iter.time.max().mjd()[0].as_py()
+                - candidates_iter.time.min().mjd()[0].as_py()
+            )
+            search_summary_iter["num_obs"] = len(found_obs_id_prev)
+
         # Current set of observation IDs up for consideration
         obs_ids_iter = candidates_iter.observation_id
 
         # Update the search summary
         search_summary_iter["min_mjd"] = min_mjd_iter
         search_summary_iter["max_mjd"] = max_mjd_iter
-        search_summary_iter["num_candidates"] = num_candidates
+        search_summary_iter["num_candidates"] = len(processed_obs_ids)
 
         if len(candidates_iter) < 6:
             logger.debug(
@@ -330,6 +364,7 @@ def ipod(
 
         # The orbit solution may have changed so if we have any rejected observations
         # lets evaluate the ensemble and see if any should be re-accepted
+        obs_ids_reconsider: set[str] = set()
         if len(rejected_obs_ids) > 0:
             _, orbit_members_iter_ = evaluate_orbits(
                 orbit_iter.to_orbits(),
@@ -346,29 +381,42 @@ def ipod(
                 solution=orbit_members_iter.solution,
             )
 
-            obs_ids_reaccept = orbit_members_iter_.apply_mask(
-                pc.and_(
-                    pc.less_equal(orbit_members_iter_.residuals.chi2, reconsider_chi2),
-                    pc.is_in(orbit_members_iter_.obs_id, pa.array(rejected_obs_ids)),
-                )
-            ).obs_id
-            if len(obs_ids_reaccept) > 0:
+            # Find any observations that have a chi2 less than the reconsider_chi2
+            # and add them for re-consideration
+            obs_ids_reconsider = set(
+                orbit_members_iter_.apply_mask(
+                    pc.and_(
+                        pc.less_equal(
+                            orbit_members_iter_.residuals.chi2, reconsider_chi2
+                        ),
+                        pc.is_in(
+                            orbit_members_iter_.obs_id, pa.array(rejected_obs_ids)
+                        ),
+                    )
+                ).obs_id.to_pylist()
+            )
+            if len(obs_ids_reconsider) > 0:
                 logger.debug(
-                    f"Re-accepting {len(obs_ids_reaccept)} previously rejected observations."
+                    f"Re-accepting {len(obs_ids_reconsider)} previously rejected observations."
                 )
-                rejected_obs_ids = list(
-                    set(rejected_obs_ids) - set(obs_ids_reaccept.to_pylist())
-                )
+                rejected_obs_ids -= obs_ids_reconsider
                 search_summary_iter["num_rejected"] = len(rejected_obs_ids)
+                force_fit = True
 
-        found, missed, new = identify_found_missed_and_new(obs_ids_prev, obs_ids_iter)
-        logger.debug(f"Found {len(found)} observations from the previous iteration.")
-        logger.debug(f"Missed {len(missed)} observations from the previous iteration.")
-        logger.debug(f"Found {len(new)} new observations.")
+        found_obs_ids, missed_obs_ids, new_obs_ids = identify_found_missed_and_new(
+            pa.array(list(processed_obs_ids)), obs_ids_iter
+        )
+        logger.debug(
+            f"Found {len(found_obs_ids)} observations from the previous iteration."
+        )
+        logger.debug(
+            f"Missed {len(missed_obs_ids)} observations from the previous iteration."
+        )
+        logger.debug(f"Found {len(new_obs_ids)} new observations.")
 
         # If no new observations were found, then lets increase the tolerance and jump to the next
         # iteration. There is no point in orbit fitting if no new observations were found.
-        if len(new) == 0 and not force_fit:
+        if len(new_obs_ids) == 0 and not force_fit:
             tolerance_iter = update_tolerance(tolerance_iter)
             if tolerance_iter > max_tolerance:
                 logger.debug(
@@ -380,23 +428,24 @@ def ipod(
             )
             continue
 
-        # Remove any candidates that we have previously rejected
+        # Remove any observations that we have previously rejected
         if len(rejected_obs_ids) > 0:
+            num_candidates = len(orbit_observations_iter)
             orbit_observations_iter = orbit_observations_iter.apply_mask(
                 pc.invert(
                     pc.is_in(orbit_observations_iter.id, pa.array(rejected_obs_ids))
                 )
             )
-            logger.debug(f"Removed {len(rejected_obs_ids)} rejected observations.")
-            num_candidates = len(orbit_observations_iter)
-            search_summary_iter["num_candidates"] = num_candidates
+            logger.debug(
+                f"Removed {num_candidates - len(orbit_observations_iter)} rejected observations."
+            )
 
         # Attempt to differentially correct the orbit given the new observations
         # If we have previous observations then we will use them to calculate
         # the contamination percentage
         if len(orbit_observations_iter) > 0:
             contamination_percentage = np.minimum(
-                (len(new) + 1) / num_candidates * 100, 100
+                (len(new_obs_ids) + 1) / len(orbit_observations_iter) * 100, 100
             )
 
         # If we do not have previous observations then we will use a default
@@ -408,7 +457,7 @@ def ipod(
             contamination_percentage = 50.0
 
         logger.debug(
-            f"Running orbit fit with {len(new)} new observations "
+            f"Running orbit fit with {len(new_obs_ids)} new observations "
             f"and a contamination percentage of {contamination_percentage:.2f}%..."
         )
         orbit_iter_fit, orbit_members_iter_fit = od(
@@ -416,9 +465,13 @@ def ipod(
             orbit_observations_iter,
             rchi2_threshold=rchi2_threshold,
             min_obs=6,
-            min_arc_length=1,
-            max_iter=10,
+            min_arc_length=1.0,
             contamination_percentage=contamination_percentage,
+            delta=1e-8,
+            max_iter=10,
+            method="central",
+            propagator=propagator,
+            propagator_kwargs=propagator_kwargs,
         )
         if force_fit:
             force_fit = False
@@ -429,23 +482,25 @@ def ipod(
             # code did its best job at removing the outliers but that it still failed
             # despite its best efforts. The rejected observations can still be re-accepted
             # in a later iteration if their chi2 is less than the reconsider_chi2.
-            if len(obs_ids_prev) > 0:
-                obs_ids = orbit_observations_iter.id
-                obs_ids_added = obs_ids.filter(
-                    pc.invert(pc.is_in(obs_ids, obs_ids_prev))
-                )
-                rejected_obs_ids.extend(obs_ids_added.to_pylist())
+            failed_corrections += 1
+            logger.debug(
+                "Orbit fit failed. Removing newly added observations and adding "
+                "them to the rejected observations list."
+            )
+            if len(new_obs_ids) > 0:
+                rejected_obs_ids.update(new_obs_ids)
 
-                search_summary_iter["num_rejected"] = len(rejected_obs_ids)
-                logger.debug(
-                    "Orbit fit failed. Removing newly added observations and adding "
-                    "them to the rejected observations list."
-                )
+            # If the fit failed and we have added observations for reconsideration
+            # then we should re-add them to the rejected list
+            if len(obs_ids_reconsider) > 0:
+                rejected_obs_ids.update(obs_ids_reconsider)
 
-            # Skip to the next iteration since the best-fit orbit has not changed
-            # since the previous iteration
+            # Update the search summary and skip to the next iteration since the
+            # best-fit orbit has not converged
+            search_summary_iter["num_rejected"] = len(rejected_obs_ids)
             continue
         else:
+            failed_corrections = 0
             orbit_iter = orbit_iter_fit
             orbit_members_iter = orbit_members_iter_fit
 
@@ -459,32 +514,52 @@ def ipod(
         outlier_ids = orbit_members_iter.apply_mask(outlier_mask).obs_id
 
         # Add identified outliers to the rejected observations list
-        rejected_obs_ids.extend(outlier_ids.to_pylist())
+        rejected_obs_ids.update(outlier_ids.to_pylist())
 
+        # Remove the outliers from the orbit observations and orbit members
         orbit_observations_iter = orbit_observations_iter.apply_mask(
             pc.invert(pc.is_in(orbit_observations_iter.id, outlier_ids))
         )
         orbit_members_iter = orbit_members_iter.apply_mask(
             pc.invert(pc.is_in(orbit_members_iter.obs_id, outlier_ids))
         )
-        obs_ids_iter = orbit_observations_iter.id
-        logger.debug(f"Found {len(outlier_ids)} outliers.")
+
+        # Get the array of observations that were accepted
+        obs_ids_accepted = orbit_observations_iter.id
+        logger.debug(
+            f"Accepted {len(obs_ids_accepted)} observations and identified {len(outlier_ids)} outliers."
+        )
 
         # Update candidates iter to reflect the new set of observations
         candidates_iter = candidates_iter.apply_mask(
             pc.is_in(candidates_iter.observation_id, orbit_observations_iter.id)
         )
 
-        # Update the rest of the search summary
-        search_summary_iter["num_accepted"] = len(obs_ids_iter)
-        search_summary_iter["num_rejected"] = len(rejected_obs_ids)
-        search_summary_iter["arc_length"] = orbit_iter.arc_length[0].as_py()
-        search_summary_iter["num_obs"] = orbit_iter.num_obs[0].as_py()
+        # Compute the arc length, number of observations, and the reduced chi2
+        # of the orbit fit
+        arc_length = (
+            orbit_observations_iter.coordinates.time.max().mjd()[0].as_py()
+            - orbit_observations_iter.coordinates.time.min().mjd()[0].as_py()
+        )
+        num_obs = len(orbit_observations_iter)
+        reduced_chi2 = calculate_reduced_chi2(orbit_members_iter.residuals, 6)
 
-        if (
-            len(obs_ids_prev) > 0
-            and pc.all(pc.is_in(obs_ids_iter, obs_ids_prev)).as_py()
-        ):
+        # Update the rest of the search summary
+        search_summary_iter["num_accepted"] = len(obs_ids_accepted)
+        search_summary_iter["num_rejected"] = len(rejected_obs_ids)
+        search_summary_iter["arc_length"] = arc_length
+        search_summary_iter["num_obs"] = len(orbit_observations_iter)
+
+        # Update the orbit's fit parameters since we may have removed some observations
+        # not removed by OD
+        orbit_iter = orbit_iter.set_column("num_obs", pa.array([num_obs]))
+        orbit_iter = orbit_iter.set_column("arc_length", pa.array([arc_length]))
+        orbit_iter = orbit_iter.set_column(
+            "chi2", pa.array([pc.sum(orbit_members_iter.residuals.chi2)])
+        )
+        orbit_iter = orbit_iter.set_column("reduced_chi2", pa.array([reduced_chi2]))
+
+        if len(new_obs_ids) == 0:
             # If the observations have not changed since the previous iteration, lets
             # try increasing the search window and tolerance
             if (
@@ -514,14 +589,8 @@ def ipod(
                     f"Increasing the tolerance to {tolerance_iter}."
                 )
 
-    if i == max_iter - 1:
-        logger.debug("Maximum number of iterations reached. Exiting.")
-
-    if orbit_iter.reduced_chi2[0].as_py() > rchi2_threshold:
-        logger.debug(
-            f"Final reduced chi2 of {orbit_iter.reduced_chi2[0].as_py()} "
-            f"is greater than the threshold of {rchi2_threshold}."
-        )
+    if len(orbit_members_iter) == 0:
+        logger.debug("No valid observation found. Exiting.")
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
@@ -529,8 +598,11 @@ def ipod(
             SearchSummary.empty(),
         )
 
-    if len(orbit_observations_iter) == 0:
-        logger.debug("No observations found. Exiting.")
+    if orbit_iter.reduced_chi2[0].as_py() > rchi2_threshold:
+        logger.debug(
+            f"Final reduced chi2 of {orbit_iter.reduced_chi2[0].as_py()} "
+            f"is greater than the threshold of {rchi2_threshold}."
+        )
         return (
             FittedOrbits.empty(),
             FittedOrbitMembers.empty(),
