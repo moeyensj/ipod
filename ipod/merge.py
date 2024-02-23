@@ -76,7 +76,7 @@ def merge_and_extend_orbits(
 
     iterations = 0
     while len(orbits_iter) > 0:
-        logger.info(f"Starting iteration {iterations + 1} of {max_iter}.")
+        logger.info(f"Starting iteration {iterations + 1}...")
 
         chunk_size_iter = np.minimum(
             np.ceil(len(orbits_iter) / max_processes).astype(int), chunk_size
@@ -259,9 +259,35 @@ def merge_and_extend_orbits(
 
             break
 
+    # Now update the search summary to reflect the final state of the orbits
+    orbits_out = orbits_out.sort_by("orbit_id")
+    orbit_members_out = orbit_members_out.sort_by("orbit_id")
+    orbit_candidates_out = orbit_candidates_out.sort_by("orbit_id")
+    search_summary_out = search_summary_out.sort_by("orbit_id")
+
+    # Filter the input orbits down to the orbits that have survived the merge and extend process
+    orbits_remaining = orbits.apply_mask(
+        pc.is_in(orbits.orbit_id, orbits_out.orbit_id)
+    ).sort_by("orbit_id")
+
+    # Ensure that the output orbits, input orbits, and summary are consistent
+    assert len(orbits_out) == len(orbits_remaining)
+    assert pc.all(pc.equal(orbits_remaining.orbit_id, orbits_out.orbit_id)).as_py()
+    assert pc.all(
+        pc.equal(orbits_remaining.orbit_id, search_summary_out.orbit_id)
+    ).as_py()
+
+    # Update the search summary to reflect to original input arc lengths and number of observations
+    search_summary_out = search_summary_out.set_column(
+        "num_obs_prev", orbits_remaining.num_obs
+    )
+    search_summary_out = search_summary_out.set_column(
+        "arc_length_prev", orbits_remaining.arc_length
+    )
+
     time_end = time.perf_counter()
     logger.info(
         f"Merged and extended {len(orbits)} orbits into {len(orbits_out)} orbits."
     )
-    logger.info(f"Merge and extended completed in {time_end - time_start:.3f} seconds.")
+    logger.info(f"Merge and extend completed in {time_end - time_start:.3f} seconds.")
     return orbits_out, orbit_members_out, orbit_candidates_out, search_summary_out
