@@ -9,6 +9,7 @@ from adam_core.orbits import Orbits
 from adam_core.propagator import Propagator
 from adam_core.time import Timestamp
 from precovery.main import PrecoveryCandidatesQv
+from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 
 
 def calculate_astrometric_uncertainty(
@@ -273,3 +274,76 @@ def identify_found_missed_and_new(
         obs_ids_prev.filter(missed_mask).to_pylist(),
         obs_ids_iter.filter(new_mask).to_pylist(),
     )
+
+
+def assign_duplicate_observations(
+    orbits, orbit_members: FittedOrbitMembers
+) -> Tuple[FittedOrbits, FittedOrbitMembers]:
+    """
+    Assigns observations that have been assigned to multiple orbits to the orbit with t
+    he most observations, longest arc length, and lowest reduced chi2.
+    Parameters
+    ----------
+    orbit_members : `~thor.orbit_determination.FittedOrbitMembers`
+        Fitted orbit members.
+    Returns
+    -------
+    filtered : `~thor.orbit_determination.FittedOrbits`
+        Fitted orbits with duplicate assignments removed.
+    filtered_orbit_members : `~thor.orbit_determination.FittedOrbitMembers`
+        Fitted orbit members with duplicate assignments removed.
+    """
+    # Sort by number of observations, arc length, and reduced chi2
+    # Here we assume that orbits that generally have more observations, longer arc lengths,
+    # and lower reduced chi2 are better as candidates for assigning detections
+    # that have been assigned to multiple orbits.
+    orbits_sorted = orbits.sort_by(
+        [
+            ("num_obs", "descending"),
+            ("arc_length", "descending"),
+            ("reduced_chi2", "ascending"),
+        ]
+    )
+
+    # Extract the orbit IDs from the sorted table
+    orbit_ids = orbits_sorted.orbit_id.unique()
+
+    # Calculate the order in which these orbit IDs appear in the orbit_members table
+    order_in_orbits = pc.index_in(orbit_members.orbit_id, orbit_ids)
+
+    # Create an index into the orbit_members table and append the order_in_orbits column
+    orbit_members_table = (
+        orbit_members.flattened_table()
+        .append_column("index", pa.array(np.arange(len(orbit_members))))
+        .append_column("order_in_orbits", order_in_orbits)
+    )
+
+    # Drop the residual values (a list column) due to: https://github.com/apache/arrow/issues/32504
+    orbit_members_table = orbit_members_table.drop_columns(["residuals.values"])
+
+    # Sort orbit members by the orbit IDs (in the same order as the orbits table)
+    orbit_members_table = orbit_members_table.sort_by(
+        [("order_in_orbits", "ascending")]
+    )
+
+    # Now group by the orbit ID and aggregate the index column to get the first index for each orbit ID
+    indices = (
+        orbit_members_table.group_by("obs_id", use_threads=False)
+        .aggregate([("index", "first")])
+        .column("index_first")
+    )
+
+    # Use the indices to filter the orbit_members table and
+    # then use the resulting orbit IDs to filter the orbits table
+    filtered_orbit_members = orbit_members.take(indices)
+    filtered = orbits.apply_mask(
+        pc.is_in(orbits.orbit_id, filtered_orbit_members.orbit_id)
+    )
+
+    # Defragment the tables
+    if filtered.fragmented():
+        filtered = qv.defragment(filtered)
+    if filtered_orbit_members.fragmented():
+        filtered_orbit_members = qv.defragment(filtered_orbit_members)
+
+    return filtered, filtered_orbit_members
