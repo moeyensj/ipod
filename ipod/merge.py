@@ -174,6 +174,9 @@ def merge_and_extend_orbits(
         # and add them to the outgoing tables, also identify any orbits that have not
         # had any new observations added since the previous iteration
         mask = pc.equal(orbits_iter.success, False)
+        logger.info(
+            f"Identified {pc.sum(mask).as_py()} orbits that did not converge to a new solution."
+        )
         if iterations > 0:
             orbit_ids = search_summary_iter.orbit_id.filter(
                 pc.equal(search_summary_iter.num_obs_prev, search_summary_iter.num_obs)

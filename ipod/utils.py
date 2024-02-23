@@ -297,7 +297,7 @@ def assign_duplicate_observations(
     # Here we assume that orbits that generally have more observations, longer arc lengths,
     # and lower reduced chi2 are better as candidates for assigning detections
     # that have been assigned to multiple orbits.
-    sorted = orbits.sort_by(
+    orbits_sorted = orbits.sort_by(
         [
             ("num_obs", "descending"),
             ("arc_length", "descending"),
@@ -306,7 +306,7 @@ def assign_duplicate_observations(
     )
 
     # Extract the orbit IDs from the sorted table
-    orbit_ids = sorted.orbit_id.unique()
+    orbit_ids = orbits_sorted.orbit_id.unique()
 
     # Calculate the order in which these orbit IDs appear in the orbit_members table
     order_in_orbits = pc.index_in(orbit_members.orbit_id, orbit_ids)
@@ -339,5 +339,11 @@ def assign_duplicate_observations(
     filtered = orbits.apply_mask(
         pc.is_in(orbits.orbit_id, filtered_orbit_members.orbit_id)
     )
+
+    # Defragment the tables
+    if filtered.fragmented():
+        filtered = qv.defragment(filtered)
+    if filtered_orbit_members.fragmented():
+        filtered_orbit_members = qv.defragment(filtered_orbit_members)
 
     return filtered, filtered_orbit_members
