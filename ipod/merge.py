@@ -30,7 +30,7 @@ def merge_and_extend_orbits(
     orbit_members: Optional[FittedOrbitMembers] = None,
     observations: Optional[Observations] = None,
     max_tolerance: float = 10.0,
-    delta_time: float = 30.0,
+    delta_time: float = 15.0,
     rchi2_threshold: float = 3.0,
     outlier_chi2: float = 9.0,
     reconsider_chi2: float = 8.0,
@@ -121,19 +121,18 @@ def merge_and_extend_orbits(
         if precovery_candidates_unique.fragmented():
             precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
 
-        if observations is None:
-            coordinates = precovery_candidates_unique.to_spherical_coordinates()
-            observations_iter = Observations.from_kwargs(
-                id=precovery_candidates_unique.observation_id,
-                exposure_id=precovery_candidates_unique.exposure_id,
-                coordinates=coordinates,
-                photometry=Photometry.from_kwargs(
-                    mag=precovery_candidates_unique.mag,
-                    mag_sigma=precovery_candidates_unique.mag_sigma,
-                    filter=precovery_candidates_unique.filter,
-                ),
-                state_id=calculate_state_id_hashes(coordinates),
-            )
+        coordinates = precovery_candidates_unique.to_spherical_coordinates()
+        observations_iter = Observations.from_kwargs(
+            id=precovery_candidates_unique.observation_id,
+            exposure_id=precovery_candidates_unique.exposure_id,
+            coordinates=coordinates,
+            photometry=Photometry.from_kwargs(
+                mag=precovery_candidates_unique.mag,
+                mag_sigma=precovery_candidates_unique.mag_sigma,
+                filter=precovery_candidates_unique.filter,
+            ),
+            state_id=calculate_state_id_hashes(coordinates),
+        )
 
         orbits_iter, orbit_members_iter = differential_correction(
             orbits_iter,

@@ -51,7 +51,7 @@ def ipod(
     orbit: Union[Orbits, FittedOrbits],
     orbit_observations: Optional[OrbitDeterminationObservations] = None,
     max_tolerance: float = 10.0,
-    delta_time: float = 30.0,
+    delta_time: float = 15.0,
     rchi2_threshold: float = 3.0,
     outlier_chi2: float = 9.0,
     reconsider_chi2: float = 8.0,
