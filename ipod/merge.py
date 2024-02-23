@@ -4,6 +4,7 @@ import time
 from typing import Optional, Tuple, Type
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
 from adam_core.propagator import PYOORB, Propagator
@@ -152,8 +153,18 @@ def merge_and_extend_orbits(
         )
 
         # Filter the precovery candidates and search summary
+        orbit_obs_id_candidates = pc.binary_join_element_wise(
+            precovery_candidates_iter.orbit_id,
+            precovery_candidates_iter.observation_id,
+            pc.cast("-", pa.large_string()),
+        )
+        orbit_obs_id_members = pc.binary_join_element_wise(
+            orbit_members_iter.orbit_id,
+            orbit_members_iter.obs_id,
+            pc.cast("-", pa.large_string()),
+        )
         precovery_candidates_iter = precovery_candidates_iter.apply_mask(
-            pc.is_in(precovery_candidates_iter.orbit_id, orbits_iter.orbit_id)
+            pc.is_in(orbit_obs_id_candidates, orbit_obs_id_members)
         )
         search_summary_iter = search_summary_iter.apply_mask(
             pc.is_in(search_summary_iter.orbit_id, orbits_iter.orbit_id)
