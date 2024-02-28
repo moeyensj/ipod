@@ -108,6 +108,12 @@ def merge_and_extend_orbits(
             max_processes=max_processes,
         )
 
+        if len(orbits_iter) == 0:
+            logger.warning(
+                "Exiting merge and extend early, no orbits returned from IPDC."
+            )
+            break
+
         orbits_iter, orbit_members_iter = assign_duplicate_observations(
             orbits_iter, orbit_members_iter
         )

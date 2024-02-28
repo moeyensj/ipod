@@ -92,22 +92,27 @@ def ipod_worker(
         else:
             orbit_observations = None
 
-        ipod_orbit, ipod_orbit_members, ipod_candidates_i, summary = ipod(
-            orbit,
-            orbit_observations=orbit_observations,
-            max_tolerance=max_tolerance,
-            delta_time=delta_time,
-            rchi2_threshold=rchi2_threshold,
-            outlier_chi2=outlier_chi2,
-            reconsider_chi2=reconsider_chi2,
-            max_iter=max_iter,
-            min_mjd=min_mjd,
-            max_mjd=max_mjd,
-            database=precovery_db,
-            datasets=datasets,
-            propagator=propagator,
-            propagator_kwargs=propagator_kwargs,
-        )
+        try:
+            ipod_orbit, ipod_orbit_members, ipod_candidates_i, summary = ipod(
+                orbit,
+                orbit_observations=orbit_observations,
+                max_tolerance=max_tolerance,
+                delta_time=delta_time,
+                rchi2_threshold=rchi2_threshold,
+                outlier_chi2=outlier_chi2,
+                reconsider_chi2=reconsider_chi2,
+                max_iter=max_iter,
+                min_mjd=min_mjd,
+                max_mjd=max_mjd,
+                database=precovery_db,
+                datasets=datasets,
+                propagator=propagator,
+                propagator_kwargs=propagator_kwargs,
+            )
+        except Exception as e:
+            logger.error(f"Error processing orbit {orbit_id}: {e}")
+            print(f"Error processing orbit {orbit_id}: {e}")
+            raise e
 
         ipod_orbits = qv.concatenate([ipod_orbits, ipod_orbit])
         if ipod_orbits.fragmented():
