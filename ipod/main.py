@@ -68,10 +68,26 @@ def ipod_worker(
                 pc.is_in(observations.id, obs_ids)
             )
 
+            # Sort the observations by time and origin
+            orbit_observations = orbit_observations.sort_by(
+                [
+                    "coordinates.time.days",
+                    "coordinates.time.nanos",
+                    "coordinates.origin.code",
+                ]
+            )
+
+            # Calculate observers
+            observers = orbit_observations.get_observers().observers
+            observers = observers.sort_by(
+                ["coordinates.time.days", "coordinates.time.nanos", "code"]
+            )
+
+            # Create orbit determination observations
             orbit_observations = OrbitDeterminationObservations.from_kwargs(
                 id=orbit_observations.id,
                 coordinates=orbit_observations.coordinates,
-                observers=orbit_observations.get_observers().observers,
+                observers=observers,
             )
         else:
             orbit_observations = None
