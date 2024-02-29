@@ -121,6 +121,15 @@ def ipod(
     # If observations have been passed lets make sure that
     # the given orbit has been evaluated with the given observations
     if orbit_observations is not None:
+        # Make sure the observations are sorted
+        orbit_observations = orbit_observations.sort_by(
+            [
+                "coordinates.time.days",
+                "coordinates.time.nanos",
+                "coordinates.origin.code",
+            ]
+        )
+
         # Evaluate the orbit with the given observations
         orbit_iter, orbit_members_iter = evaluate_orbits(
             orbit.to_orbits(),
