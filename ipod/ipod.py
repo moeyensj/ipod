@@ -64,6 +64,7 @@ def ipod(
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
+    logger.debug(f"Running ipod with orbit {orbit.orbit_id[0].as_py()}...")
 
     # Initialize the propagator
     prop = propagator(**propagator_kwargs)
@@ -299,7 +300,8 @@ def ipod(
             logger.debug("Proposed search window end is after the maximum MJD.")
 
         logger.debug(
-            f"Running precovery search between {min_mjd_iter:.5f} and {max_mjd_iter:.5f} "
+            f"Running precovery search for {orbit_iter.orbit_id[0].as_py()} "
+            f"between {min_mjd_iter:.5f} and {max_mjd_iter:.5f} "
             f"[dt: {max_mjd_iter-min_mjd_iter:.5f}] with a {tolerance_iter:.3f} arcsecond tolerance..."
         )
         candidates_iter, frame_candidates = precovery_db.precover(
