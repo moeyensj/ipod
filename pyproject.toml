@@ -32,7 +32,7 @@ dependencies = [
     "pyarrow>=14.0.0",
     "ray[default]",
     "thor @ git+https://github.com/moeyensj/thor.git@3172ac20342ae5490c2cc55e230a718874c3d77e#egg=thor",
-    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@bc8ab31dea72577e907e852089abbc9245d828b9#egg=precovery",
+    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@8fb44d2467338789e48eaca30eaf82d146887e04#egg=precovery",
 ]
 
 [project.optional-dependencies]
