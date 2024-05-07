@@ -1,3 +1,4 @@
+import logging
 from typing import Tuple
 
 import numpy as np
@@ -10,6 +11,8 @@ from adam_core.propagator import Propagator
 from adam_core.time import Timestamp
 from precovery.main import PrecoveryCandidatesQv
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_astrometric_uncertainty(
@@ -139,6 +142,8 @@ def check_candidates_astrometric_errors(
     candidates
         The precovery candidates with the missing uncertainties assigned.
     """
+    assert "default" in astrometric_errors, "Default astrometric error is not defined."
+
     ra_sigma_arcsec = candidates.ra_sigma_arcsec.to_numpy(zero_copy_only=False)
     dec_sigma_arcsec = candidates.dec_sigma_arcsec.to_numpy(zero_copy_only=False)
     observatory_codes = candidates.obscode.to_numpy(zero_copy_only=False)
@@ -148,7 +153,9 @@ def check_candidates_astrometric_errors(
     if np.any(invalid_ra_sigma):
         invalid_observatory_codes = np.unique(observatory_codes[invalid_ra_sigma])
         for code in invalid_observatory_codes:
-            print("Found missing 1-sigma RA uncertainties for observatory code:", code)
+            logger.warning(
+                f"Found missing 1-sigma RA uncertainties for observatory code: {code}"
+            )
             if code not in astrometric_errors:
                 ra_sigma_arcsec = np.where(
                     observatory_codes == code,
@@ -167,7 +174,9 @@ def check_candidates_astrometric_errors(
     if np.any(invalid_dec_sigma):
         invalid_observatory_codes = np.unique(observatory_codes[invalid_dec_sigma])
         for code in invalid_observatory_codes:
-            print("Found missing 1-sigma Dec uncertainties for observatory code:", code)
+            logger.warning(
+                f"Found missing 1-sigma Dec uncertainties for observatory code: {code}"
+            )
             if code not in astrometric_errors:
                 dec_sigma_arcsec = np.where(
                     observatory_codes == code,
