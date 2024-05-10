@@ -19,7 +19,7 @@ from thor.orbit_determination.fitted_orbits import (
 from thor.orbits.od import differential_correction
 from thor.utils.quivr import drop_duplicates
 
-from .ipod import PrecoveryCandidates, SearchSummary
+from .ipod import OrbitOutliers, PrecoveryCandidates, SearchSummary
 from .main import iterative_precovery_and_differential_correction
 from .utils import assign_duplicate_observations
 
@@ -40,6 +40,7 @@ def merge_and_extend_orbits(
     max_mjd: Optional[float] = None,
     database_directory: str = "",
     datasets: Optional[set[str]] = None,
+    orbit_outliers: Optional[OrbitOutliers] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
     chunk_size: int = 100,
@@ -102,6 +103,7 @@ def merge_and_extend_orbits(
             max_mjd=max_mjd,
             database_directory=database_directory,
             datasets=datasets,
+            orbit_outliers=orbit_outliers,
             propagator=propagator,
             propagator_kwargs=propagator_kwargs,
             chunk_size=chunk_size_iter,
