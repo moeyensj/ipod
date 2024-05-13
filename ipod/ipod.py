@@ -40,6 +40,22 @@ class SearchSummary(qv.Table):
     num_obs = qv.Int64Column()
 
 
+class OrbitOutliers(qv.Table):
+    orbit_id = qv.LargeStringColumn(nullable=True)
+    obs_id = qv.LargeStringColumn()
+
+    def select_global_outliers(self):
+        return self.apply_mask(pc.is_null(self.orbit_id))
+
+    def select_orbit_outliers(self, orbit_id):
+        return self.select("orbit_id", orbit_id)
+
+    def select_orbit_and_global_outliers(self, orbit_id):
+        return self.apply_mask(
+            pc.or_(pc.is_null(self.orbit_id), pc.equal(self.orbit_id, orbit_id))
+        )
+
+
 def update_tolerance(tolerance, tolerance_step=2.5):
     if tolerance == 1:
         return tolerance_step
@@ -61,6 +77,7 @@ def ipod(
     astrometric_errors: dict = {},
     database: Union[str, PrecoveryDatabase] = "",
     datasets: Optional[set[str]] = None,
+    orbit_outliers: Optional[OrbitOutliers] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
@@ -130,6 +147,25 @@ def ipod(
                 "coordinates.origin.code",
             ]
         )
+
+        # mask out permanent rejections
+        # should we be doing this this early?
+        if orbit_outliers is not None:
+            n_obs = len(orbit_observations)
+            orbit_observations = orbit_observations.apply_mask(
+                pc.invert(
+                    pc.is_in(
+                        orbit_observations.id,
+                        orbit_outliers.select_orbit_and_global_outliers(
+                            orbit.orbit_id[0]
+                        ).obs_id,
+                    )
+                )
+            )
+            logger.debug(
+                f"Removed {n_obs - len(orbit_observations)} global"
+                " and orbit-specific rejections."
+            )
 
         # Evaluate the orbit with the given observations
         orbit_iter, orbit_members_iter = evaluate_orbits(
@@ -333,6 +369,26 @@ def ipod(
         if len(candidates_iter) != num_candidates:
             logger.debug(
                 f"Removed {num_candidates - len(candidates_iter)} coincident candidates."
+            )
+            num_candidates = len(candidates_iter)
+
+        # drop candidates that are in the orbit outliers table
+        if orbit_outliers is not None:
+            candidates_iter = candidates_iter.apply_mask(
+                pc.invert(
+                    pc.is_in(
+                        candidates_iter.observation_id,
+                        orbit_outliers.select_orbit_and_global_outliers(
+                            orbit.orbit_id[0]
+                        ).obs_id,
+                    )
+                )
+            )
+
+        if len(candidates_iter) != num_candidates:
+            logger.debug(
+                f"Removed {num_candidates - len(candidates_iter)} observations"
+                "that were in the orbit outliers table."
             )
             num_candidates = len(candidates_iter)
 

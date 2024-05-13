@@ -17,7 +17,7 @@ from precovery.precovery_db import PrecoveryDatabase
 from thor.observations import Observations
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 
-from .ipod import PrecoveryCandidates, SearchSummary, ipod
+from .ipod import OrbitOutliers, PrecoveryCandidates, SearchSummary, ipod
 
 logger = logging.getLogger("ipod")
 
@@ -37,6 +37,7 @@ def ipod_worker(
     max_mjd: Optional[float] = None,
     database: Union[str, PrecoveryDatabase] = "",
     datasets: Optional[set[str]] = None,
+    orbit_outliers: Optional[OrbitOutliers] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
@@ -106,6 +107,7 @@ def ipod_worker(
                 max_mjd=max_mjd,
                 database=precovery_db,
                 datasets=datasets,
+                orbit_outliers=orbit_outliers,
                 propagator=propagator,
                 propagator_kwargs=propagator_kwargs,
             )
@@ -149,6 +151,7 @@ def ipod_worker_remote(
     max_mjd: Optional[float] = None,
     database_directory: str = "",
     datasets: Optional[set[str]] = None,
+    orbit_outliers: Optional[OrbitOutliers] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ):
@@ -181,6 +184,7 @@ def ipod_worker_remote(
         max_mjd=max_mjd,
         database=database,
         datasets=datasets,
+        orbit_outliers=orbit_outliers,
         propagator=propagator,
         propagator_kwargs=propagator_kwargs,
     )
@@ -207,6 +211,7 @@ def iterative_precovery_and_differential_correction(
     max_mjd: Optional[float] = None,
     database_directory: str = "",
     datasets: Optional[set[str]] = None,
+    orbit_outliers: Optional[OrbitOutliers] = None,
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
     chunk_size: int = 10,
@@ -333,6 +338,7 @@ def iterative_precovery_and_differential_correction(
                     max_mjd=max_mjd,
                     database_directory=database_directory,
                     datasets=datasets,
+                    orbit_outliers=orbit_outliers,
                     propagator=propagator,
                     propagator_kwargs=propagator_kwargs,
                 )
@@ -424,6 +430,7 @@ def iterative_precovery_and_differential_correction(
                 max_mjd=max_mjd,
                 database=database_directory,
                 datasets=datasets,
+                orbit_outliers=orbit_outliers,
                 propagator=propagator,
                 propagator_kwargs=propagator_kwargs,
             )
