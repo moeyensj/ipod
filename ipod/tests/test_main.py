@@ -196,11 +196,6 @@ def od_observations(orbits, observations):
     yield od_obs
 
 
-def test_import():
-    # flake8: noqa
-    from ipod import iterative_precovery_and_differential_correction
-
-
 def test_index(precovery_db, orbits):
     db, test_db_dir, offset_ids = precovery_db
     # precover one of our orbits
