@@ -14,12 +14,10 @@ from adam_core.orbit_determination.evaluate import (
     OrbitDeterminationObservations,
     evaluate_orbits,
 )
-from adam_core.propagator import PYOORB, Propagator
+from adam_core.propagator import PYOORB
 from adam_core.utils.helpers import make_observations, make_real_orbits
 from precovery.ingest import index
 from precovery.precovery_db import PrecoveryDatabase
-from thor.observations import Observations
-from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 
 from ipod.ipod import OrbitOutliers, ipod
 
