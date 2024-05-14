@@ -63,6 +63,12 @@ def update_tolerance(tolerance, tolerance_step=2.5):
         return tolerance + tolerance_step
 
 
+DEFAULT_ASTROMETRIC_ERRORS = {
+    # Default errors in arcseconds (100 mas, 100 mas)
+    "default": (0.1, 0.1),
+}
+
+
 def ipod(
     orbit: Union[Orbits, FittedOrbits],
     orbit_observations: Optional[OrbitDeterminationObservations] = None,
@@ -74,7 +80,7 @@ def ipod(
     max_iter: int = 10,
     min_mjd: Optional[float] = None,
     max_mjd: Optional[float] = None,
-    astrometric_errors: dict = {},
+    astrometric_errors: Optional[dict[str, Tuple[float, float]]] = None,
     database: Union[str, PrecoveryDatabase] = "",
     datasets: Optional[set[str]] = None,
     orbit_outliers: Optional[OrbitOutliers] = None,
@@ -82,6 +88,8 @@ def ipod(
     propagator_kwargs: dict = {},
 ) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
     logger.debug(f"Running ipod with orbit {orbit.orbit_id[0].as_py()}...")
+    if astrometric_errors is None:
+        astrometric_errors = DEFAULT_ASTROMETRIC_ERRORS
 
     # Initialize the propagator
     prop = propagator(**propagator_kwargs)
