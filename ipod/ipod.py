@@ -15,6 +15,7 @@ from adam_core.propagator import PYOORB, Propagator
 from precovery.precovery_db import PrecoveryCandidatesQv as PrecoveryCandidates
 from precovery.precovery_db import PrecoveryDatabase
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
+from thor.orbits.iod import iod
 from thor.orbits.od import od
 
 from .utils import (
@@ -51,9 +52,10 @@ class OrbitOutliers(qv.Table):
         return self.select("orbit_id", orbit_id)
 
     def select_orbit_and_global_outliers(self, orbit_id):
-        return self.apply_mask(
-            pc.or_(pc.is_null(self.orbit_id), pc.equal(self.orbit_id, orbit_id))
-        )
+        null_mask = pc.is_null(self.orbit_id)
+        orbit_mask = pc.equal(self.orbit_id, orbit_id)
+        orbit_mask = pc.fill_null(orbit_mask, False)
+        return self.apply_mask(pc.or_(null_mask, orbit_mask))
 
 
 def update_tolerance(tolerance, tolerance_step=2.5):
@@ -158,8 +160,8 @@ def ipod(
 
         # mask out permanent rejections
         # should we be doing this this early?
+        n_obs = len(orbit_observations)
         if orbit_outliers is not None:
-            n_obs = len(orbit_observations)
             orbit_observations = orbit_observations.apply_mask(
                 pc.invert(
                     pc.is_in(
@@ -175,49 +177,90 @@ def ipod(
                 " and orbit-specific rejections."
             )
 
-        # Evaluate the orbit with the given observations
-        orbit_iter, orbit_members_iter = evaluate_orbits(
-            orbit.to_orbits(),
-            orbit_observations,
-            prop,
-        )
+        # Evaluate the orbit with the given observations if we have
+        # any left
+        if len(orbit_observations) > 0:
+            orbit_iter, orbit_members_iter = evaluate_orbits(
+                orbit.to_orbits(),
+                orbit_observations,
+                prop,
+            )
 
-        # We recast ouput orbits and orbit members to the FittedOrbits
-        # and FittedOrbitMember from THOR
-        orbit_iter = FittedOrbits.from_kwargs(
-            orbit_id=orbit_iter.orbit_id,
-            coordinates=orbit_iter.coordinates,
-            arc_length=orbit_iter.arc_length,
-            num_obs=orbit_iter.num_obs,
-            chi2=orbit_iter.chi2,
-            reduced_chi2=orbit_iter.reduced_chi2,
-            iterations=orbit_iter.iterations,
-            success=orbit_iter.success,
-            status_code=orbit_iter.status_code,
-        )
-        orbit_members_iter = FittedOrbitMembers.from_kwargs(
-            orbit_id=orbit_members_iter.orbit_id,
-            obs_id=orbit_members_iter.obs_id,
-            residuals=orbit_members_iter.residuals,
-            outlier=orbit_members_iter.outlier,
-            solution=orbit_members_iter.solution,
-        )
+            # We recast ouput orbits and orbit members to the FittedOrbits
+            # and FittedOrbitMember from THOR
+            orbit_iter = FittedOrbits.from_kwargs(
+                orbit_id=orbit_iter.orbit_id,
+                coordinates=orbit_iter.coordinates,
+                arc_length=orbit_iter.arc_length,
+                num_obs=orbit_iter.num_obs,
+                chi2=orbit_iter.chi2,
+                reduced_chi2=orbit_iter.reduced_chi2,
+                iterations=orbit_iter.iterations,
+                success=orbit_iter.success,
+                status_code=orbit_iter.status_code,
+            )
+            orbit_members_iter = FittedOrbitMembers.from_kwargs(
+                orbit_id=orbit_members_iter.orbit_id,
+                obs_id=orbit_members_iter.obs_id,
+                residuals=orbit_members_iter.residuals,
+                outlier=orbit_members_iter.outlier,
+                solution=orbit_members_iter.solution,
+            )
+
+        else:
+            logger.debug(
+                "No observations left after removing global and orbit-specific rejections. "
+                "Proceeding with previous orbit and ignoring provided observations."
+            )
+            orbit_iter = orbit
+            orbit_members_iter = FittedOrbitMembers.empty()
+            orbit_observations_iter = OrbitDeterminationObservations.empty()
+            obs_ids_iter = pa.array([])
 
         # Now fit the orbit with the given observations so we make sure we have
         # an accurate orbit to start with
-        orbit_iter_fit, orbit_members_iter_fit = od(
-            orbit_iter,
-            orbit_observations,
-            rchi2_threshold=rchi2_threshold,
-            min_obs=6,
-            min_arc_length=1.0,
-            contamination_percentage=0.0,
-            delta=1e-8,
-            max_iter=5,
-            method="central",
-            propagator=propagator,
-            propagator_kwargs=propagator_kwargs,
-        )
+
+        # Run IOD only if we have been given a set of outliers and we've
+        # removed observations from the orbit_observations
+        if n_obs != len(orbit_observations) and len(orbit_observations) > 0:
+            orbit_iter_fit, orbit_members_iter_fit = iod(
+                orbit_observations,
+                min_obs=np.minimum(len(orbit_observations), 6),
+                min_arc_length=1.0,
+                contamination_percentage=0.0,
+                rchi2_threshold=1e5,
+                observation_selection_method="combinations",
+                propagator=propagator,
+                propagator_kwargs=propagator_kwargs,
+            )
+            if len(orbit_iter_fit) > 0:
+                orbit_iter_fit = orbit_iter_fit.set_column(
+                    "orbit_id", orbit_iter.orbit_id
+                )
+                orbit_members_iter_fit = orbit_members_iter_fit.set_column(
+                    "orbit_id",
+                    pa.repeat(orbit_iter.orbit_id[0], len(orbit_members_iter_fit)),
+                )
+        else:
+            orbit_iter_fit = FittedOrbits.empty()
+            orbit_members_iter_fit = FittedOrbitMembers.empty()
+
+        # What if IOD identifies outliers???
+        if len(orbit_iter_fit) != 0:
+            orbit_iter_fit, orbit_members_iter_fit = od(
+                orbit_iter_fit,
+                orbit_observations,
+                rchi2_threshold=rchi2_threshold,
+                min_obs=6,
+                min_arc_length=1.0,
+                contamination_percentage=0.0,
+                delta=1e-8,
+                max_iter=5,
+                method="central",
+                propagator=propagator,
+                propagator_kwargs=propagator_kwargs,
+            )
+
         if len(orbit_iter_fit) == 0:
             logger.debug(
                 "Initial orbit fit with provided observations failed. "
@@ -395,7 +438,7 @@ def ipod(
 
         if len(candidates_iter) != num_candidates:
             logger.debug(
-                f"Removed {num_candidates - len(candidates_iter)} observations"
+                f"Removed {num_candidates - len(candidates_iter)} observations "
                 "that were in the orbit outliers table."
             )
             num_candidates = len(candidates_iter)
