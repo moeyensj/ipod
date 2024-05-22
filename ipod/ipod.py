@@ -175,64 +175,73 @@ def ipod(
                 " and orbit-specific rejections."
             )
 
-        # Evaluate the orbit with the given observations
-        orbit_iter, orbit_members_iter = evaluate_orbits(
-            orbit.to_orbits(),
-            orbit_observations,
-            prop,
-        )
+        if len(orbit_observations) > 0:
+            # Evaluate the orbit with the given observations
+            orbit_iter, orbit_members_iter = evaluate_orbits(
+                orbit.to_orbits(),
+                orbit_observations,
+                prop,
+            )
 
-        # We recast ouput orbits and orbit members to the FittedOrbits
-        # and FittedOrbitMember from THOR
-        orbit_iter = FittedOrbits.from_kwargs(
-            orbit_id=orbit_iter.orbit_id,
-            coordinates=orbit_iter.coordinates,
-            arc_length=orbit_iter.arc_length,
-            num_obs=orbit_iter.num_obs,
-            chi2=orbit_iter.chi2,
-            reduced_chi2=orbit_iter.reduced_chi2,
-            iterations=orbit_iter.iterations,
-            success=orbit_iter.success,
-            status_code=orbit_iter.status_code,
-        )
-        orbit_members_iter = FittedOrbitMembers.from_kwargs(
-            orbit_id=orbit_members_iter.orbit_id,
-            obs_id=orbit_members_iter.obs_id,
-            residuals=orbit_members_iter.residuals,
-            outlier=orbit_members_iter.outlier,
-            solution=orbit_members_iter.solution,
-        )
+            # We recast ouput orbits and orbit members to the FittedOrbits
+            # and FittedOrbitMember from THOR
+            orbit_iter = FittedOrbits.from_kwargs(
+                orbit_id=orbit_iter.orbit_id,
+                coordinates=orbit_iter.coordinates,
+                arc_length=orbit_iter.arc_length,
+                num_obs=orbit_iter.num_obs,
+                chi2=orbit_iter.chi2,
+                reduced_chi2=orbit_iter.reduced_chi2,
+                iterations=orbit_iter.iterations,
+                success=orbit_iter.success,
+                status_code=orbit_iter.status_code,
+            )
+            orbit_members_iter = FittedOrbitMembers.from_kwargs(
+                orbit_id=orbit_members_iter.orbit_id,
+                obs_id=orbit_members_iter.obs_id,
+                residuals=orbit_members_iter.residuals,
+                outlier=orbit_members_iter.outlier,
+                solution=orbit_members_iter.solution,
+            )
 
-        # Now fit the orbit with the given observations so we make sure we have
-        # an accurate orbit to start with
-        orbit_iter_fit, orbit_members_iter_fit = od(
-            orbit_iter,
-            orbit_observations,
-            rchi2_threshold=rchi2_threshold,
-            min_obs=6,
-            min_arc_length=1.0,
-            contamination_percentage=0.0,
-            delta=1e-8,
-            max_iter=5,
-            method="central",
-            propagator=propagator,
-            propagator_kwargs=propagator_kwargs,
-        )
-        if len(orbit_iter_fit) == 0:
+            # Now fit the orbit with the given observations so we make sure we have
+            # an accurate orbit to start with
+            orbit_iter_fit, orbit_members_iter_fit = od(
+                orbit_iter,
+                orbit_observations,
+                rchi2_threshold=rchi2_threshold,
+                min_obs=6,
+                min_arc_length=1.0,
+                contamination_percentage=0.0,
+                delta=1e-8,
+                max_iter=5,
+                method="central",
+                propagator=propagator,
+                propagator_kwargs=propagator_kwargs,
+            )
+            if len(orbit_iter_fit) == 0:
+                logger.debug(
+                    "Initial orbit fit with provided observations failed. "
+                    "Proceeding with previous orbit and ignoring provided observations."
+                )
+                orbit_iter = orbit
+                orbit_members_iter = FittedOrbitMembers.empty()
+                orbit_observations_iter = OrbitDeterminationObservations.empty()
+                obs_ids_iter = pa.array([])
+
+            else:
+                orbit_iter = orbit_iter_fit
+                orbit_members_iter = orbit_members_iter_fit
+                orbit_observations_iter = orbit_observations
+                obs_ids_iter = orbit_observations_iter.id
+        else:
             logger.debug(
-                "Initial orbit fit with provided observations failed. "
-                "Proceeding with previous orbit and ignoring provided observations."
+                "No valid observations found. Proceeding with previous orbit and ignoring provided observations."
             )
             orbit_iter = orbit
             orbit_members_iter = FittedOrbitMembers.empty()
             orbit_observations_iter = OrbitDeterminationObservations.empty()
             obs_ids_iter = pa.array([])
-
-        else:
-            orbit_iter = orbit_iter_fit
-            orbit_members_iter = orbit_members_iter_fit
-            orbit_observations_iter = orbit_observations
-            obs_ids_iter = orbit_observations_iter.id
 
     else:
         orbit_iter = orbit

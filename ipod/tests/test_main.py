@@ -280,3 +280,85 @@ def test_ipod_orbit_outliers(precovery_db, orbits, observations, od_observations
             all_obs_less_outliers.id.to_numpy(zero_copy_only=False),
         )
         break
+
+
+def test_ipod_orbit_outliers_all_bad(
+    precovery_db, orbits, observations, od_observations
+):
+
+    db, test_db_dir, offset_ids = precovery_db
+
+    exposures, detections, associations = observations
+
+    for object_id in OBJECT_IDS:
+
+        # orbit = orbits.select("object_id", object_id)
+        orbit = orbits.select("object_id", object_id)
+
+        associations_i = associations.select("object_id", orbit.object_id[0])
+
+        od_observations_i = od_observations.apply_mask(
+            pc.is_in(od_observations.id, associations_i.detection_id)
+        )
+
+        # We are only fitting on a subset of the observations so that ipod has some new obs to find
+        fitted_orbits, fitted_orbit_members = evaluate_orbits(
+            orbit, od_observations_i[:10], propagator=PYOORB()
+        )
+
+        detections_i = detections.apply_mask(
+            pc.is_in(detections.id, od_observations_i.id)
+        )
+        mjd_min = pc.min(detections_i.time.mjd())
+        mjd_max = pc.max(detections_i.time.mjd())
+
+        # Now let's create a set of orbit outliers
+        outlier_detections = od_observations_i[:10]
+        orbit_outliers = OrbitOutliers.from_kwargs(
+            orbit_id=pa.array(
+                [orbit.orbit_id[0] for i in range(len(outlier_detections))]
+            ),
+            obs_id=outlier_detections.id,
+        )
+
+        ipod_result = ipod(
+            fitted_orbits,
+            od_observations_i[:10],
+            max_tolerance=5.0,
+            delta_time=10.0,
+            max_iter=50,
+            min_mjd=mjd_min.as_py() - 1.0,
+            max_mjd=mjd_max.as_py() + 1.0,
+            astrometric_errors={"default": (0.1, 0.1)},
+            orbit_outliers=orbit_outliers,
+            database=db,
+        )
+
+        (
+            ipod_fitted_orbits_i,
+            ipod_fitted_orbit_members_i,
+            precovery_candidates,
+            search_summary,
+        ) = ipod_result
+
+        # assert we got none of our input obs back
+        assert (
+            len(
+                precovery_candidates.apply_mask(
+                    pc.is_in(
+                        precovery_candidates.observation_id, od_observations_i[:10].id
+                    )
+                )
+            )
+            == 0
+        )
+
+        # assert that we got all the obs back save for the outliers
+        all_obs_less_outliers = detections_i.apply_mask(
+            pc.invert(pc.is_in(detections_i.id, od_observations_i[:10].id))
+        )
+        np.testing.assert_equal(
+            precovery_candidates.observation_id.to_numpy(zero_copy_only=False),
+            all_obs_less_outliers.id.to_numpy(zero_copy_only=False),
+        )
+        break
