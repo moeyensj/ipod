@@ -140,6 +140,7 @@ def ipod(
         )
 
     force_fit = False
+    orbit_observations_iter = OrbitDeterminationObservations.empty()
     # If observations have been passed lets make sure that
     # the given orbit has been evaluated with the given observations
     if orbit_observations is not None:
@@ -307,8 +308,9 @@ def ipod(
         i += 1
         logger.debug(f"Starting IPOD iteration {i}...")
 
-        # Update the running list of processed observation IDs
-        processed_obs_ids.update(obs_ids_iter.to_pylist())
+        if len(orbit_observations_iter) > 0:
+            # Update the running list of processed observation IDs
+            processed_obs_ids.update(obs_ids_iter.to_pylist())
 
         # Compute the min and max observation times if they exist
         if len(orbit_observations_iter) > 0:

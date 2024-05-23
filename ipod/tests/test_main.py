@@ -244,9 +244,9 @@ def test_ipod_orbit_outliers(precovery_db, orbits, observations, od_observations
         ipod_result = ipod(
             fitted_orbits,
             od_observations_i[:10],
-            max_tolerance=5.0,
+            max_tolerance=10.0,
+            tolerance_step=2.0,
             delta_time=10.0,
-            max_iter=50,
             min_mjd=mjd_min.as_py() - 1.0,
             max_mjd=mjd_max.as_py() + 1.0,
             astrometric_errors={"default": (0.1, 0.1)},
@@ -260,7 +260,6 @@ def test_ipod_orbit_outliers(precovery_db, orbits, observations, od_observations
             precovery_candidates,
             search_summary,
         ) = ipod_result
-
         # assert we got none of our outlier obs back
         assert (
             len(
@@ -324,9 +323,9 @@ def test_ipod_orbit_outliers_all_bad(
         ipod_result = ipod(
             fitted_orbits,
             od_observations_i[:10],
-            max_tolerance=5.0,
+            max_tolerance=10.0,
+            tolerance_step=2.0,
             delta_time=10.0,
-            max_iter=50,
             min_mjd=mjd_min.as_py() - 1.0,
             max_mjd=mjd_max.as_py() + 1.0,
             astrometric_errors={"default": (0.1, 0.1)},
