@@ -20,7 +20,7 @@ from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 
 from .ipod import OrbitOutliers, PrecoveryCandidates, SearchSummary, ipod
 
-logger = logging.getLogger("ipod")
+logger = logging.getLogger(__name__)
 
 
 def ipod_worker(
