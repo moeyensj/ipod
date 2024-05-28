@@ -11,7 +11,8 @@ from adam_core.orbit_determination import (
     evaluate_orbits,
 )
 from adam_core.orbits import Orbits
-from adam_core.propagator import PYOORB, Propagator
+from adam_core.propagator import Propagator
+from adam_core.propagator.adam_pyoorb import PYOORBPropagator as PYOORB
 from precovery.precovery_db import PrecoveryCandidatesQv as PrecoveryCandidates
 from precovery.precovery_db import PrecoveryDatabase
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
