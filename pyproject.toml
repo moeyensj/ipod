@@ -31,8 +31,9 @@ dependencies = [
     "numpy",
     "pyarrow>=14.0.0",
     "ray[default]",
-    "thor @ git+https://github.com/moeyensj/thor.git@3172ac20342ae5490c2cc55e230a718874c3d77e#egg=thor",
-    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@8fb44d2467338789e48eaca30eaf82d146887e04#egg=precovery",
+    "thor @ git+https://github.com/moeyensj/thor.git@857b808be575323b5954f67ea304149f27b7ef2c#egg=thor",
+    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@22fdd7f67bccc36d80ac35f52e83bc05b76ac31e#egg=precovery",
+    "quivr>=0.7.3a1",
 ]
 
 [project.optional-dependencies]
