@@ -140,12 +140,6 @@ def merge_and_extend_orbits(
 
         precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
 
-        # if len(precovery_candidates_unique) == 0:
-        #     precovery_candidates_unique = PrecoveryCandidates.empty()
-        # for i, col in enumerate(precovery_candidates_unique.table.columns):
-        #     print(f"{i}: col of type {type(col)}")
-        #     print(col.chunks[0])
-
         coordinates = precovery_candidates_unique.to_spherical_coordinates()
         observations_iter = Observations.from_kwargs(
             id=precovery_candidates_unique.observation_id,
