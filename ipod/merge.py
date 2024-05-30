@@ -137,7 +137,6 @@ def merge_and_extend_orbits(
         if precovery_candidates_unique.fragmented():
             precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
 
-
         precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
 
         coordinates = precovery_candidates_unique.to_spherical_coordinates()
