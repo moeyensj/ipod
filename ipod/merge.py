@@ -137,35 +137,11 @@ def merge_and_extend_orbits(
         if precovery_candidates_unique.fragmented():
             precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
 
-        sigmas_ra = (
-            precovery_candidates_unique.ra_sigma_arcsec.to_numpy(zero_copy_only=False)
-            / 3600
-        )
-        sigmas_dec = (
-            precovery_candidates_unique.dec_sigma_arcsec.to_numpy(zero_copy_only=False)
-            / 3600
-        )
-
-        # logger.info(f"sigmas_ra: {sigmas_ra}")
-        # logger.info(f"sigmas_dec: {sigmas_dec}")
-
-        # logger.info(f"ra_deg: {precovery_candidates_unique.ra_deg}")
-        # logger.info(f"dec_deg: {precovery_candidates_unique.dec_deg}")
-        # logger.info(f"time: {precovery_candidates_unique.time}")
-        # logger.info(f"obscode: {precovery_candidates_unique.obscode}")
 
         precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
-        print(f"sigmas_ra: {sigmas_ra}")
-        print(f"sigmas_dec: {sigmas_dec}")
-        print(f"ra_deg: {precovery_candidates_unique.ra_deg}")
-        print(f"dec_deg: {precovery_candidates_unique.dec_deg}")
-        print(f"time: {precovery_candidates_unique.time}")
-        print(f"obscode: {precovery_candidates_unique.obscode}")
-        print(precovery_candidates_unique.to_dataframe())
-        print(PrecoveryCandidates.empty().to_spherical_coordinates())
 
-        if len(precovery_candidates_unique) == 0:
-            precovery_candidates_unique = PrecoveryCandidates.empty()
+        # if len(precovery_candidates_unique) == 0:
+        #     precovery_candidates_unique = PrecoveryCandidates.empty()
         # for i, col in enumerate(precovery_candidates_unique.table.columns):
         #     print(f"{i}: col of type {type(col)}")
         #     print(col.chunks[0])
