@@ -126,6 +126,8 @@ def merge_and_extend_orbits(
             )
             break
 
+        search_summary_iter = search_summary_iter.sort_by(["orbit_id"])
+
         orbits_iter, orbit_members_iter = assign_duplicate_observations(
             orbits_iter, orbit_members_iter
         )
@@ -195,10 +197,12 @@ def merge_and_extend_orbits(
             mask = pc.is_in(
                 search_summary_last_iter.orbit_id, search_summary_iter.orbit_id
             )
+            search_summary_last_iter = search_summary_last_iter.apply_mask(mask)
+            search_summary_last_iter = search_summary_last_iter.sort_by(["orbit_id"])
             search_summary_iter = search_summary_iter.set_column(
                 "run_duration",
                 pc.add(
-                    search_summary_last_iter.apply_mask(mask).run_duration,
+                    search_summary_last_iter.run_duration,
                     search_summary_iter.run_duration,
                 ),
             )
