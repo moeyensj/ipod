@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Optional, Tuple, Type, Union
 
 import numpy as np
@@ -40,6 +41,7 @@ class SearchSummary(qv.Table):
     arc_length = qv.Float64Column()
     num_obs_prev = qv.Int64Column()
     num_obs = qv.Int64Column()
+    run_duration = qv.Float64Column()
 
 
 class OrbitOutliers(qv.Table):
@@ -84,6 +86,8 @@ def ipod(
     propagator: Type[Propagator] = PYOORB,
     propagator_kwargs: dict = {},
 ) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
+
+    time_start = time.perf_counter()
     logger.debug(f"Running ipod with orbit {orbit.orbit_id[0].as_py()}...")
     if astrometric_errors is None:
         astrometric_errors = DEFAULT_ASTROMETRIC_ERRORS
@@ -301,6 +305,7 @@ def ipod(
         "arc_length": 0,
         "num_obs_prev": orbit_iter.num_obs[0].as_py(),
         "num_obs": 0,
+        "run_duration": 0.0,
     }
 
     failed_corrections = 0
@@ -731,6 +736,8 @@ def ipod(
     candidates = candidates_iter.apply_mask(
         pc.is_in(candidates_iter.observation_id, orbit_members_iter.obs_id)
     )
+    time_end = time.perf_counter()
+    search_summary_iter["run_duration"] = time_end - time_start
 
     search_summary = SearchSummary.from_kwargs(
         **{k: [v] for k, v in search_summary_iter.items()}

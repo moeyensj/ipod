@@ -58,6 +58,7 @@ def merge_and_extend_orbits(
     orbit_members_out = FittedOrbitMembers.empty()
     orbit_candidates_out = PrecoveryCandidates.empty()
     search_summary_out = SearchSummary.empty()
+    search_summary_iter = SearchSummary.empty()
 
     if max_processes is None:
         max_processes = mp.cpu_count()
@@ -87,6 +88,8 @@ def merge_and_extend_orbits(
         chunk_size_iter = np.minimum(
             np.ceil(len(orbits_iter) / max_processes).astype(int), chunk_size
         )
+
+        search_summary_last_iter = search_summary_iter
 
         # Run iterative precovery and differential correction
         (
@@ -122,6 +125,8 @@ def merge_and_extend_orbits(
                 "Exiting merge and extend early, no orbits returned from IPOD."
             )
             break
+
+        search_summary_iter = search_summary_iter.sort_by(["orbit_id"])
 
         orbits_iter, orbit_members_iter = assign_duplicate_observations(
             orbits_iter, orbit_members_iter
@@ -186,6 +191,21 @@ def merge_and_extend_orbits(
         search_summary_iter = search_summary_iter.apply_mask(
             pc.is_in(search_summary_iter.orbit_id, orbits_iter.orbit_id)
         )
+
+        # if we are on at least the second iteration, accumulate the run_duration
+        if iterations > 0:
+            mask = pc.is_in(
+                search_summary_last_iter.orbit_id, search_summary_iter.orbit_id
+            )
+            search_summary_last_iter = search_summary_last_iter.apply_mask(mask)
+            search_summary_last_iter = search_summary_last_iter.sort_by(["orbit_id"])
+            search_summary_iter = search_summary_iter.set_column(
+                "run_duration",
+                pc.add(
+                    search_summary_last_iter.run_duration,
+                    search_summary_iter.run_duration,
+                ),
+            )
 
         # Identify orbits that have not had their differential correction converge to a new solution
         # and add them to the outgoing tables, also identify any orbits that have not
