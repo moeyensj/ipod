@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 
 import numpy as np
 import pyarrow as pa
@@ -360,4 +361,61 @@ def test_ipod_orbit_outliers_all_bad(
             precovery_candidates.observation_id.to_numpy(zero_copy_only=False),
             all_obs_less_outliers.id.to_numpy(zero_copy_only=False),
         )
+        break
+
+
+def test_ipod_runtime(precovery_db, orbits, observations, od_observations):
+
+    db, test_db_dir, offset_ids = precovery_db
+
+    exposures, detections, associations = observations
+
+    for object_id in OBJECT_IDS:
+
+        # orbit = orbits.select("object_id", object_id)
+        orbit = orbits.select("object_id", object_id)
+
+        associations_i = associations.select("object_id", orbit.object_id[0])
+
+        od_observations_i = od_observations.apply_mask(
+            pc.is_in(od_observations.id, associations_i.detection_id)
+        )
+
+        fitted_orbits, fitted_orbit_members = evaluate_orbits(
+            orbit, od_observations_i, propagator=PYOORB()
+        )
+
+        detections_i = detections.apply_mask(
+            pc.is_in(detections.id, od_observations_i.id)
+        )
+        mjd_min = pc.min(detections_i.time.mjd())
+        mjd_max = pc.max(detections_i.time.mjd())
+
+        time_start = time.perf_counter()
+        ipod_result = ipod(
+            fitted_orbits,
+            od_observations_i[:10],
+            max_tolerance=10.0,
+            tolerance_step=2.0,
+            delta_time=10.0,
+            min_mjd=mjd_min.as_py() - 1.0,
+            max_mjd=mjd_max.as_py() + 1.0,
+            astrometric_errors={"default": (0.1, 0.1)},
+            database=db,
+        )
+        time_end = time.perf_counter()
+
+        (
+            ipod_fitted_orbits_i,
+            ipod_fitted_orbit_members_i,
+            precovery_candidates,
+            search_summary,
+        ) = ipod_result
+
+        # assert we are accumulating runtimes > 0
+        assert search_summary.run_duration[0].as_py() > 0.0
+
+        # assert that our individual runtime is less than total
+        assert time_end - time_start > search_summary.run_duration[0].as_py()
+
         break
