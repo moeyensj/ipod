@@ -359,15 +359,6 @@ def assign_duplicate_observations(
     return filtered, filtered_orbit_members
 
 
-class MergeSummary(qv.Table):
-    old_orbit_id = qv.LargeStringColumn()
-    merged_orbit_id = qv.LargeStringColumn()
-    old_obs_count = qv.Int64Column()
-    old_destination_orbit_obs_count = qv.Int64Column(nullable=True)
-    num_obs_carried_over = qv.Int64Column()
-    merged_orbit_obs_count = qv.Int64Column(nullable=True)
-
-
 class ExpectedMembers(qv.Table):
     orbit_id = qv.LargeStringColumn()
     obs_id = qv.LargeStringColumn()
