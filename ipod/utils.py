@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
@@ -373,227 +374,123 @@ class ExpectedMembers(qv.Table):
     primary_designation = qv.LargeStringColumn(nullable=True)
 
 
-def identify_orbit_merges(
-    members_expected: ExpectedMembers,
-    members_initial: FittedOrbitMembers,
-):
-    # find the sets of members in members_initial that should merge into
-    # members expected
-
-    out_members = {
-        "old_orbit_id": [],
-        "merged_orbit_id": [],
-        "old_obs_count": [],
-        "old_destination_orbit_obs_count": [],
-        "num_obs_carried_over": [],
-        "merged_orbit_obs_count": [],
-    }
-    # we iterate over expected orbits, and find cases where there are
-    # multiple orbits in members_initial that contain obs in the expected orbit
-    for orb_id in members_expected.orbit_id.unique().to_pylist():
-        orbit_members = members_expected.where(
-            pc.equal(members_expected.column("orbit_id"), orb_id)
-        )
-        obs_ids = orbit_members.obs_id
-        # find obs in members_initial that match these ids
-        matching_members = members_initial.apply_mask(
-            pc.is_in(members_initial.obs_id, obs_ids)
-        )
-        if len(matching_members.orbit_id.unique()) > 1:
-            # we have a merge case
-            for initial_orbit_id in matching_members.orbit_id.unique().to_pylist():
-                matching_member_ids = matching_members.where(
-                    pc.equal(matching_members.column("orbit_id"), initial_orbit_id)
-                ).obs_id
-                if initial_orbit_id == orb_id:
-                    continue
-                out_members["old_orbit_id"].append(initial_orbit_id)
-                out_members["merged_orbit_id"].append(orb_id)
-                out_members["old_obs_count"].append(
-                    len(
-                        members_initial.where(
-                            pc.equal(
-                                members_initial.column("orbit_id"), initial_orbit_id
-                            )
-                        )
-                    )
-                )
-                out_members["num_obs_carried_over"].append(
-                    len(
-                        members_initial.apply_mask(
-                            pc.is_in(members_initial.obs_id, matching_member_ids)
-                        ).obs_id.unique()
-                    )
-                )
-                out_members["merged_orbit_obs_count"].append(
-                    len(
-                        members_expected.where(
-                            pc.equal(members_expected.column("orbit_id"), orb_id)
-                        )
-                    )
-                )
-    out_members = MergeSummary.from_kwargs(
-        old_orbit_id=out_members["old_orbit_id"],
-        merged_orbit_id=out_members["merged_orbit_id"],
-        old_obs_count=out_members["old_obs_count"],
-        num_obs_carried_over=out_members["num_obs_carried_over"],
-        merged_orbit_obs_count=out_members["merged_orbit_obs_count"],
-    )
-    return out_members
-
-
-def identify_merged_dropped_orbits(
-    members_initial: FittedOrbitMembers,
-    orbits_initial: FittedOrbits,
-    members_me: FittedOrbitMembers,
-    orbits_me: FittedOrbits,
-) -> Tuple[MergeSummary, list[str]]:
-    missing_orbits = orbits_initial.apply_mask(
-        pc.invert(
-            pc.is_in(orbits_initial.column("orbit_id"), orbits_me.orbit_id.unique())
-        )
-    )
-    missing_ids = missing_orbits.orbit_id.to_pylist()
-
-    # determine which orbits now contain obs from the subsumed orbits
-    merges: Dict[str, List[Union[str, int, None]]] = {
-        "old_orbit_id": [],
-        "merged_orbit_id": [],
-        "old_obs_count": [],
-        "old_destination_orbit_obs_count": [],
-        "num_obs_carried_over": [],
-        "merged_orbit_obs_count": [],
-    }
-    orbits_removed = []
-    # for id in missing_ids:
-    for id in orbits_initial.orbit_id.unique().to_pylist():
-        old_members = members_initial.where(
-            pc.equal(members_initial.column("orbit_id"), id)
-        )
-        # now find what orbits contains these in the result members
-        obs_ids = old_members.obs_id
-        new_members = members_me.apply_mask(pc.is_in(members_me.obs_id, obs_ids))
-        if len(new_members) == 0:
-            orbits_removed.append(id)
-        # now find the orbit ids of these members
-        new_orbit_ids = new_members.orbit_id
-
-        # this denotes a partial merge
-        for new_id in new_orbit_ids.unique().to_pylist():
-            if new_id == id:
-                continue
-            members_merged_orbit = members_me.apply_mask(
-                pc.equal(members_me.column("orbit_id"), new_id)
-            )
-            merges["old_orbit_id"].append(id)
-            merges["merged_orbit_id"].append(new_id)
-            merges["old_obs_count"].append(len(obs_ids))
-            merges["old_destination_orbit_obs_count"].append(
-                len(
-                    members_initial.where(
-                        pc.equal(members_initial.column("orbit_id"), new_id)
-                    )
-                )
-            )
-            merges["num_obs_carried_over"].append(
-                len(new_members.where(pc.equal(new_members.column("orbit_id"), new_id)))
-            )
-            merges["merged_orbit_obs_count"].append(len(members_merged_orbit))
-
-    return (
-        MergeSummary.from_kwargs(
-            old_orbit_id=merges["old_orbit_id"],
-            merged_orbit_id=merges["merged_orbit_id"],
-            old_obs_count=merges["old_obs_count"],
-            old_destination_orbit_obs_count=merges["old_destination_orbit_obs_count"],
-            num_obs_carried_over=merges["num_obs_carried_over"],
-            merged_orbit_obs_count=merges["merged_orbit_obs_count"],
-        ),
-        orbits_removed,
-    )
-
-
-class MERecoverySummary(qv.Table):
-    old_orbit_id = qv.LargeStringColumn()
-    merged_orbit_id = qv.LargeStringColumn()
-    expected_num_obs = qv.Int64Column()
-    number_observations_matched = qv.Int64Column()
-    total_obs_resulting_linkage = qv.Int64Column()
-
-
 def analyze_me_output(
     members_expected: ExpectedMembers,
     members_initial: FittedOrbitMembers,
-    orbits_initial: FittedOrbits,
-    orbits_me: FittedOrbits,
     members_me: FittedOrbitMembers,
-) -> Tuple[MergeSummary, MergeSummary, MERecoverySummary, list[str]]:
+) -> Tuple[pd.DataFrame]:
     """
     Analyze the output of the merge and extend process. This function will return
     summaries of merged orbits, orbits that were removed, and the results of ME
     run based on an expected set of linkages (members_expected).
     """
-    # first find the orbits that should be merged
-    expected_merge_summary = identify_orbit_merges(members_expected, members_initial)
 
-    # first find the merged/removed orbits
-    merge_summary, orbits_removed = identify_merged_dropped_orbits(
-        members_initial, orbits_initial, members_me, orbits_me
+    expected_members_df = members_expected.to_dataframe()
+
+    # Merge the expected members with the initial members and the ME members to
+    # get expected attributed designations
+    attrib_merge = members_me.to_dataframe().merge(expected_members_df, on="obs_id")
+    initial_attrib_merge = members_initial.to_dataframe().merge(
+        expected_members_df, on="obs_id"
     )
+    attrib_merge_grouped = attrib_merge.groupby("primary_designation")
+    initial_attrib_merge_grouped = initial_attrib_merge.groupby("primary_designation")
 
-    # now find the deltas from the expected members
-    me_results: Dict[str, List[Union[str, int, None]]] = {
-        "old_orbit_id": [],
-        "merged_orbit_id": [],
-        "expected_num_obs": [],
-        "number_observations_matched": [],
-        "total_obs_resulting_linkage": [],
-    }
-    for orb_id in members_expected.orbit_id.unique().to_pylist():
-        orbit_members = members_expected.where(
-            pc.equal(members_expected.column("orbit_id"), orb_id)
+    # keep track of all obs_ids that are acceptable for any designation
+    all_acceptable_obs_ids = expected_members_df[
+        ~expected_members_df["primary_designation"].isna()
+    ]["obs_id"].unique()
+
+    analysis_dict = {}
+
+    # iterate through each designation and compare the expected members to the attributed members
+    for designation, members in expected_members_df.groupby("primary_designation"):
+        all_attribs_from_run = None
+
+        # count the number of initial_orbits with observations attributed to this designation
+        num_initial_orbits_with_designation = len(
+            initial_attrib_merge_grouped.get_group(designation)["orbit_id_x"].unique()
         )
-        obs_ids = orbit_members.obs_id
-        # find obs in post-me members that match these ids
-        # these observations are carried through M&E from input orbit
-        matching_members = members_me.apply_mask(pc.is_in(members_me.obs_id, obs_ids))
-        # Case where we only match to one orbit
-        if len(matching_members.orbit_id.unique()) == 1:
-            # Get all the members of the post-M&E orbit
-            resulting_orbit_members_complete = members_me.where(
-                pc.equal(members_me.column("orbit_id"), matching_members.orbit_id[0])
-            )
-            me_results["old_orbit_id"].append(orb_id)
-            me_results["merged_orbit_id"].append(matching_members.orbit_id[0])
-            me_results["expected_num_obs"].append(len(orbit_members))
-            me_results["number_observations_matched"].append(len(matching_members))
-            me_results["total_obs_resulting_linkage"].append(
-                len(resulting_orbit_members_complete)
-            )
-        elif len(matching_members.orbit_id.unique()) > 1:
-            # case where an expected linkage was split between several orbits
-            for new_id in matching_members.orbit_id.unique():
-                resulting_orbit_members_complete = members_me.where(
-                    pc.equal(members_me.column("orbit_id"), new_id)
-                )
-                me_results["old_orbit_id"].append(orb_id)
-                me_results["merged_orbit_id"].append(new_id)
-                me_results["expected_num_obs"].append(len(orbit_members))
-                me_results["number_observations_matched"].append(
-                    len(
-                        matching_members.where(
-                            pc.equal(matching_members.column("orbit_id"), new_id)
+
+        # get all members from the ME run that are attributed to this designation
+        try:
+            all_attribs_from_run = attrib_merge_grouped.get_group(designation)
+        except KeyError:
+            print(f"Designation {designation} not found in resulting members")
+            analysis_dict[designation] = {
+                "num_missing_obs": len(members),
+                "num_extra_obs": 0,
+            }
+            continue
+
+        # loop through each expected orbit_id that is attributed to this designation
+        for orbit_id, orbit_members in members.groupby("orbit_id"):
+            all_attributed_orbits_from_run = all_attribs_from_run["orbit_id_x"].unique()
+            num_missing_obs = 0
+            num_extra_obs = 0
+            num_bogus_obs = 0
+
+            # get the obs_ids that are acceptable for other designations
+            # we use this to determine if an observation is bogus, rather
+            # than mis-attributed
+            acceptable_obs_ids_for_other_designations = set(
+                all_acceptable_obs_ids
+            ) - set(members["obs_id"])
+
+            # we could have multiple orbits attributed to this designation
+            best_orbit_id = None
+            if len(all_attributed_orbits_from_run) > 1:
+
+                # keep track of the orbit with the fewest missing observations
+                best_missing_obs_count = None
+                for me_orb_id in all_attributed_orbits_from_run:
+                    members_for_orbit = all_attribs_from_run[
+                        all_attribs_from_run["orbit_id_x"] == me_orb_id
+                    ]
+                    expected_obs_ids = orbit_members["obs_id"]
+                    result_obs_ids = members_for_orbit["obs_id"]
+
+                    # if this orbit has fewer missing observations, save it
+                    if (
+                        best_missing_obs_count is None
+                        or len(set(expected_obs_ids) - set(result_obs_ids))
+                        < best_missing_obs_count
+                    ):
+                        num_missing_obs = len(
+                            set(expected_obs_ids) - set(result_obs_ids)
                         )
-                    )
+                        best_missing_obs_count = num_missing_obs
+                        num_extra_obs = len(set(result_obs_ids) - set(expected_obs_ids))
+                        best_orbit_id = me_orb_id
+
+            # if we have only one orbit attributed to this designation
+            else:
+                expected_obs_ids = orbit_members["obs_id"]
+                result_obs_ids = all_attribs_from_run["obs_id"]
+                num_missing_obs = len(set(expected_obs_ids) - set(result_obs_ids))
+                num_extra_obs = len(set(result_obs_ids) - set(expected_obs_ids))
+                num_bogus_obs = len(
+                    (set(result_obs_ids) - set(expected_obs_ids))
+                    - acceptable_obs_ids_for_other_designations
                 )
-                me_results["total_obs_resulting_linkage"].append(
-                    len(resulting_orbit_members_complete)
-                )
-    me_recovery_summary = MERecoverySummary.from_kwargs(
-        old_orbit_id=me_results["old_orbit_id"],
-        merged_orbit_id=me_results["merged_orbit_id"],
-        expected_num_obs=me_results["expected_num_obs"],
-        number_observations_matched=me_results["number_observations_matched"],
-        total_obs_resulting_linkage=me_results["total_obs_resulting_linkage"],
-    )
-    return merge_summary, expected_merge_summary, me_recovery_summary, orbits_removed
+                best_orbit_id = all_attributed_orbits_from_run[0]
+
+            # if this is a new record or has less missing observations, save it
+            # essentially, store results for best-fit attribution
+            if (
+                designation not in analysis_dict.keys()
+                or num_missing_obs < analysis_dict[designation]["num_missing_obs"]
+            ):
+                analysis_dict[designation] = {
+                    "num_missing_obs": num_missing_obs,
+                    "num_extra_obs": num_extra_obs,
+                    "num_bogus_obs": num_bogus_obs,
+                    "num_initial_orbits_with_designation": num_initial_orbits_with_designation,
+                    "num_result_orbits_with_designation": len(
+                        all_attributed_orbits_from_run
+                    ),
+                    "best_orbit_id": best_orbit_id,
+                    "matching_orbits": all_attributed_orbits_from_run,
+                }
+
+    return pd.DataFrame(analysis_dict).T
