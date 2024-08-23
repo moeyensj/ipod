@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Tuple, Union
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -378,11 +378,11 @@ def analyze_me_output(
     members_expected: ExpectedMembers,
     members_initial: FittedOrbitMembers,
     members_me: FittedOrbitMembers,
-) -> Tuple[pd.DataFrame]:
+) -> pd.DataFrame:
     """
     Analyze the output of the merge and extend process. This function will return
-    summaries of merged orbits, orbits that were removed, and the results of ME
-    run based on an expected set of linkages (members_expected).
+    a dataframe with a breakdown of the number of missing, extra, and bogus observations
+    as well as merges for each primary designation in the expected_members table.
     """
 
     expected_members_df = members_expected.to_dataframe()
@@ -401,15 +401,18 @@ def analyze_me_output(
         ~expected_members_df["primary_designation"].isna()
     ]["obs_id"].unique()
 
-    analysis_dict = {}
+    analysis_dict: dict = {}
 
     # iterate through each designation and compare the expected members to the attributed members
     for designation, members in expected_members_df.groupby("primary_designation"):
         all_attribs_from_run = None
 
         # count the number of initial_orbits with observations attributed to this designation
+        initial_orbits_with_attributed_members = initial_attrib_merge_grouped.get_group(
+            designation
+        )["orbit_id_x"].unique()
         num_initial_orbits_with_designation = len(
-            initial_attrib_merge_grouped.get_group(designation)["orbit_id_x"].unique()
+            initial_orbits_with_attributed_members
         )
 
         # get all members from the ME run that are attributed to this designation
@@ -420,6 +423,12 @@ def analyze_me_output(
             analysis_dict[designation] = {
                 "num_missing_obs": len(members),
                 "num_extra_obs": 0,
+                "num_bogus_obs": 0,
+                "num_initial_orbits_with_attributed_members": num_initial_orbits_with_designation,
+                "num_result_orbits_with_attributed_members": 0,
+                "best_result_orbit_id": "None",
+                "initial_orbits_with_attributed_members": initial_orbits_with_attributed_members,
+                "result_orbits_with_attributed_members": [],
             }
             continue
 
@@ -485,12 +494,13 @@ def analyze_me_output(
                     "num_missing_obs": num_missing_obs,
                     "num_extra_obs": num_extra_obs,
                     "num_bogus_obs": num_bogus_obs,
-                    "num_initial_orbits_with_designation": num_initial_orbits_with_designation,
-                    "num_result_orbits_with_designation": len(
+                    "num_initial_orbits_with_attributed_members": num_initial_orbits_with_designation,
+                    "num_result_orbits_with_attributed_members": len(
                         all_attributed_orbits_from_run
                     ),
-                    "best_orbit_id": best_orbit_id,
-                    "matching_orbits": all_attributed_orbits_from_run,
+                    "best_result_orbit_id": best_orbit_id,
+                    "initial_orbits_with_attributed_members": initial_orbits_with_attributed_members,
+                    "result_orbits_with_attributed_members": all_attributed_orbits_from_run,
                 }
 
     return pd.DataFrame(analysis_dict).T
