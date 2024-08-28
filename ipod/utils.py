@@ -480,6 +480,10 @@ def analyze_me_output(
             if (
                 designation not in analysis_dict.keys()
                 or num_missing_obs < analysis_dict[designation]["num_missing_obs"]
+                or (
+                    num_missing_obs == 0
+                    and num_extra_obs < analysis_dict[designation]["num_extra_obs"]
+                )
             ):
                 analysis_dict[designation] = {
                     "num_missing_obs": num_missing_obs,
@@ -495,3 +499,109 @@ def analyze_me_output(
                 }
 
     return pd.DataFrame(analysis_dict).T
+
+
+def identify_merges_and_extensions(initial_members, analysis_df):
+    # Initialize dictionaries to hold subarc classifications
+    overlapping_subarcs = {}
+    non_overlapping_subarcs = {}
+    extension_targets = {}
+
+    for i, row in analysis_df.iterrows():
+        designation = i  # Use the row index as the designation
+        overlapping_subarcs[designation] = []
+        non_overlapping_subarcs[designation] = []
+        extension_targets[designation] = []
+        initial_orbits_with_attributed_members = row[
+            "initial_orbits_with_attributed_members"
+        ]
+
+        # Skip rows where the initial_orbits_with_attributed_members is not an ndarray
+        # this means there are no attributed members
+        if initial_orbits_with_attributed_members is not np.ndarray:
+            continue
+
+        # Create a dictionary of sets for each orbit's members
+        member_sets = {}
+        for orbit_id in initial_orbits_with_attributed_members:
+            member_sets[orbit_id] = set(
+                initial_members.where(
+                    pc.equal(initial_members.column("orbit_id"), orbit_id)
+                ).obs_id.to_pylist()
+            )
+
+        # Check if there's only one orbit, if so, mark as an extension target
+        if len(member_sets) == 1:
+            extension_targets[designation] = list(member_sets.keys())
+            continue
+
+        # Compare each orbit's members with others to find overlaps or non-overlaps
+        for orbit_id, members in member_sets.items():
+            for other_orbit_id, other_members in member_sets.items():
+                # Skip self-comparison and avoid duplicate pairings
+                if orbit_id == other_orbit_id or orbit_id < other_orbit_id:
+                    continue
+
+                # Classify the pair as overlapping or non-overlapping
+                if members.intersection(other_members):
+                    overlapping_subarcs[designation].append(
+                        set((orbit_id, other_orbit_id))
+                    )
+                else:
+                    non_overlapping_subarcs[designation].append(
+                        set((orbit_id, other_orbit_id))
+                    )
+
+    # Return the dictionaries of overlapping, non-overlapping subarcs and extension targets
+    return overlapping_subarcs, non_overlapping_subarcs, extension_targets
+
+
+def count_successful_extensions_and_merges(analysis_df, overlapping, non_overlapping):
+    # Initialize counters for successful merges, extensions, and their expected counts
+    num_overlapping_merges = 0
+    num_non_overlapping_merges = 0
+    num_extensions = 0
+    expected_num_overlapping_merges = 0
+    expected_num_non_overlapping_merges = 0
+    expected_num_extensions = 0
+
+    # Iterate through each row in the analysis DataFrame
+    for i, row in analysis_df.iterrows():
+        # Skip rows with no attributed members
+        if row["num_result_orbits_with_attributed_members"] == 0:
+            continue
+
+        designation = i
+        init_orbs = row["initial_orbits_with_attributed_members"]
+        result_orbs = row["result_orbits_with_attributed_members"]
+        overlap = overlapping[designation]
+        non_overlap = non_overlapping[designation]
+
+        # Check if there is only one initial orbit, then it's an extension
+        if len(init_orbs) == 1:
+            expected_num_extensions += 1
+            # Check if all observations are correctly attributed (no missing or extra)
+            if row["num_missing_obs"] == 0 and row["num_extra_obs"] == 0:
+                num_extensions += 1
+        else:
+            # Count expected merges based on overlap and non-overlap lists
+            expected_num_overlapping_merges += len(overlap)
+            expected_num_non_overlapping_merges += len(non_overlap)
+
+            # Check successful merges in overlapping and non-overlapping subarcs
+            for orb_set in overlap:
+                if len(set(result_orbs).intersection(orb_set)) == 1:
+                    num_overlapping_merges += 1
+            for orb_set in non_overlap:
+                if len(set(result_orbs).intersection(orb_set)) == 1:
+                    num_non_overlapping_merges += 1
+
+    # Return counts of successful merges, extensions, and their expected counts
+    return (
+        num_overlapping_merges,
+        num_non_overlapping_merges,
+        num_extensions,
+        expected_num_overlapping_merges,
+        expected_num_non_overlapping_merges,
+        expected_num_extensions,
+    )
