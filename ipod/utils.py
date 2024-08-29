@@ -2,6 +2,7 @@ import logging
 from typing import Tuple
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
@@ -356,3 +357,251 @@ def assign_duplicate_observations(
         filtered_orbit_members = qv.defragment(filtered_orbit_members)
 
     return filtered, filtered_orbit_members
+
+
+class ExpectedMembers(qv.Table):
+    orbit_id = qv.LargeStringColumn()
+    obs_id = qv.LargeStringColumn()
+    primary_designation = qv.LargeStringColumn(nullable=True)
+
+
+def analyze_me_output(
+    members_expected: ExpectedMembers,
+    members_initial: FittedOrbitMembers,
+    members_me: FittedOrbitMembers,
+) -> pd.DataFrame:
+    """
+    Analyze the output of the merge and extend process. This function will return
+    a dataframe with a breakdown of the number of missing, extra, and bogus observations
+    as well as merges for each primary designation in the expected_members table.
+    """
+
+    expected_members_df = members_expected.to_dataframe()
+
+    # Merge the expected members with the initial members and the ME members to
+    # get expected attributed designations
+    attrib_merge = members_me.to_dataframe().merge(expected_members_df, on="obs_id")
+    initial_attrib_merge = members_initial.to_dataframe().merge(
+        expected_members_df, on="obs_id"
+    )
+    attrib_merge_grouped = attrib_merge.groupby("primary_designation")
+    initial_attrib_merge_grouped = initial_attrib_merge.groupby("primary_designation")
+
+    # keep track of all obs_ids that are acceptable for any designation
+    all_acceptable_obs_ids = expected_members_df[
+        ~expected_members_df["primary_designation"].isna()
+    ]["obs_id"].unique()
+
+    analysis_dict: dict = {}
+
+    # iterate through each designation and compare the expected members to the attributed members
+    for designation, members in expected_members_df.groupby("primary_designation"):
+        all_attribs_from_run = None
+
+        # count the number of initial_orbits with observations attributed to this designation
+        initial_orbits_with_attributed_members = initial_attrib_merge_grouped.get_group(
+            designation
+        )["orbit_id_x"].unique()
+        num_initial_orbits_with_designation = len(
+            initial_orbits_with_attributed_members
+        )
+
+        # get all members from the ME run that are attributed to this designation
+        try:
+            all_attribs_from_run = attrib_merge_grouped.get_group(designation)
+        except KeyError:
+            print(f"Designation {designation} not found in resulting members")
+            analysis_dict[designation] = {
+                "num_missing_obs": len(members),
+                "num_extra_obs": 0,
+                "num_bogus_obs": 0,
+                "num_initial_orbits_with_attributed_members": num_initial_orbits_with_designation,
+                "num_result_orbits_with_attributed_members": 0,
+                "best_result_orbit_id": "None",
+                "initial_orbits_with_attributed_members": initial_orbits_with_attributed_members,
+                "result_orbits_with_attributed_members": [],
+            }
+            continue
+
+        # loop through each expected orbit_id that is attributed to this designation
+        for orbit_id, orbit_members in members.groupby("orbit_id"):
+            all_attributed_orbits_from_run = all_attribs_from_run["orbit_id_x"].unique()
+            num_missing_obs = 0
+            num_extra_obs = 0
+            num_bogus_obs = 0
+
+            # get the obs_ids that are acceptable for other designations
+            # we use this to determine if an observation is bogus, rather
+            # than mis-attributed
+            acceptable_obs_ids_for_other_designations = set(
+                all_acceptable_obs_ids
+            ) - set(members["obs_id"])
+
+            # we could have multiple orbits attributed to this designation
+            best_orbit_id = None
+            if len(all_attributed_orbits_from_run) > 1:
+
+                # keep track of the orbit with the fewest missing observations
+                best_missing_obs_count = None
+                for me_orb_id in all_attributed_orbits_from_run:
+                    members_for_orbit = all_attribs_from_run[
+                        all_attribs_from_run["orbit_id_x"] == me_orb_id
+                    ]
+                    expected_obs_ids = orbit_members["obs_id"]
+                    result_obs_ids = members_for_orbit["obs_id"]
+
+                    # if this orbit has fewer missing observations, save it
+                    if (
+                        best_missing_obs_count is None
+                        or len(set(expected_obs_ids) - set(result_obs_ids))
+                        < best_missing_obs_count
+                    ):
+                        num_missing_obs = len(
+                            set(expected_obs_ids) - set(result_obs_ids)
+                        )
+                        best_missing_obs_count = num_missing_obs
+                        num_extra_obs = len(set(result_obs_ids) - set(expected_obs_ids))
+                        best_orbit_id = me_orb_id
+
+            # if we have only one orbit attributed to this designation
+            else:
+                expected_obs_ids = orbit_members["obs_id"]
+                result_obs_ids = all_attribs_from_run["obs_id"]
+                num_missing_obs = len(set(expected_obs_ids) - set(result_obs_ids))
+                num_extra_obs = len(set(result_obs_ids) - set(expected_obs_ids))
+                num_bogus_obs = len(
+                    (set(result_obs_ids) - set(expected_obs_ids))
+                    - acceptable_obs_ids_for_other_designations
+                )
+                best_orbit_id = all_attributed_orbits_from_run[0]
+
+            # if this is a new record or has less missing observations, save it
+            # essentially, store results for best-fit attribution
+            if (
+                designation not in analysis_dict.keys()
+                or num_missing_obs < analysis_dict[designation]["num_missing_obs"]
+                or (
+                    num_missing_obs == 0
+                    and num_extra_obs < analysis_dict[designation]["num_extra_obs"]
+                )
+            ):
+                analysis_dict[designation] = {
+                    "num_missing_obs": num_missing_obs,
+                    "num_extra_obs": num_extra_obs,
+                    "num_bogus_obs": num_bogus_obs,
+                    "num_initial_orbits_with_attributed_members": num_initial_orbits_with_designation,
+                    "num_result_orbits_with_attributed_members": len(
+                        all_attributed_orbits_from_run
+                    ),
+                    "best_result_orbit_id": best_orbit_id,
+                    "initial_orbits_with_attributed_members": initial_orbits_with_attributed_members,
+                    "result_orbits_with_attributed_members": all_attributed_orbits_from_run,
+                }
+
+    return pd.DataFrame(analysis_dict).T
+
+
+def identify_merges_and_extensions(initial_members, analysis_df):
+    # Initialize dictionaries to hold subarc classifications
+    overlapping_subarcs = {}
+    non_overlapping_subarcs = {}
+    extension_targets = {}
+
+    for i, row in analysis_df.iterrows():
+        designation = i  # Use the row index as the designation
+        overlapping_subarcs[designation] = []
+        non_overlapping_subarcs[designation] = []
+        extension_targets[designation] = []
+        initial_orbits_with_attributed_members = row[
+            "initial_orbits_with_attributed_members"
+        ]
+
+        # Skip rows where the initial_orbits_with_attributed_members is not an ndarray
+        # this means there are no attributed members
+        if initial_orbits_with_attributed_members is not np.ndarray:
+            continue
+
+        # Create a dictionary of sets for each orbit's members
+        member_sets = {}
+        for orbit_id in initial_orbits_with_attributed_members:
+            member_sets[orbit_id] = set(
+                initial_members.where(
+                    pc.equal(initial_members.column("orbit_id"), orbit_id)
+                ).obs_id.to_pylist()
+            )
+
+        # Check if there's only one orbit, if so, mark as an extension target
+        if len(member_sets) == 1:
+            extension_targets[designation] = list(member_sets.keys())
+            continue
+
+        # Compare each orbit's members with others to find overlaps or non-overlaps
+        for orbit_id, members in member_sets.items():
+            for other_orbit_id, other_members in member_sets.items():
+                # Skip self-comparison and avoid duplicate pairings
+                if orbit_id == other_orbit_id or orbit_id < other_orbit_id:
+                    continue
+
+                # Classify the pair as overlapping or non-overlapping
+                if members.intersection(other_members):
+                    overlapping_subarcs[designation].append(
+                        set((orbit_id, other_orbit_id))
+                    )
+                else:
+                    non_overlapping_subarcs[designation].append(
+                        set((orbit_id, other_orbit_id))
+                    )
+
+    # Return the dictionaries of overlapping, non-overlapping subarcs and extension targets
+    return overlapping_subarcs, non_overlapping_subarcs, extension_targets
+
+
+def count_successful_extensions_and_merges(analysis_df, overlapping, non_overlapping):
+    # Initialize counters for successful merges, extensions, and their expected counts
+    num_overlapping_merges = 0
+    num_non_overlapping_merges = 0
+    num_extensions = 0
+    expected_num_overlapping_merges = 0
+    expected_num_non_overlapping_merges = 0
+    expected_num_extensions = 0
+
+    # Iterate through each row in the analysis DataFrame
+    for i, row in analysis_df.iterrows():
+        # Skip rows with no attributed members
+        if row["num_result_orbits_with_attributed_members"] == 0:
+            continue
+
+        designation = i
+        init_orbs = row["initial_orbits_with_attributed_members"]
+        result_orbs = row["result_orbits_with_attributed_members"]
+        overlap = overlapping[designation]
+        non_overlap = non_overlapping[designation]
+
+        # Check if there is only one initial orbit, then it's an extension
+        if len(init_orbs) == 1:
+            expected_num_extensions += 1
+            # Check if all observations are correctly attributed (no missing or extra)
+            if row["num_missing_obs"] == 0 and row["num_extra_obs"] == 0:
+                num_extensions += 1
+        else:
+            # Count expected merges based on overlap and non-overlap lists
+            expected_num_overlapping_merges += len(overlap)
+            expected_num_non_overlapping_merges += len(non_overlap)
+
+            # Check successful merges in overlapping and non-overlapping subarcs
+            for orb_set in overlap:
+                if len(set(result_orbs).intersection(orb_set)) == 1:
+                    num_overlapping_merges += 1
+            for orb_set in non_overlap:
+                if len(set(result_orbs).intersection(orb_set)) == 1:
+                    num_non_overlapping_merges += 1
+
+    # Return counts of successful merges, extensions, and their expected counts
+    return (
+        num_overlapping_merges,
+        num_non_overlapping_merges,
+        num_extensions,
+        expected_num_overlapping_merges,
+        expected_num_non_overlapping_merges,
+        expected_num_extensions,
+    )
