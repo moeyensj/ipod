@@ -9,7 +9,7 @@ from adam_core.observers import Observers
 from adam_core.orbits import Orbits
 from adam_core.propagator import Propagator
 from adam_core.time import Timestamp
-from precovery.main import PrecoveryCandidatesQv
+from precovery.main import PrecoveryCandidates
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 
 logger = logging.getLogger(__name__)
@@ -122,9 +122,9 @@ def compute_search_window_and_tolerance(
 
 
 def check_candidates_astrometric_errors(
-    candidates: PrecoveryCandidatesQv,
+    candidates: PrecoveryCandidates,
     astrometric_errors: dict[str, Tuple[float, float]],
-) -> PrecoveryCandidatesQv:
+) -> PrecoveryCandidates:
     """
     Check if the precovery candidates contain any missing uncertainties. If they do then
     assign a default uncertainty to them.
@@ -198,8 +198,8 @@ def check_candidates_astrometric_errors(
 
 
 def drop_coincident_candidates(
-    candidates: PrecoveryCandidatesQv,
-) -> PrecoveryCandidatesQv:
+    candidates: PrecoveryCandidates,
+) -> PrecoveryCandidates:
     """
     Drop coincident candidates from the precovery candidates. These are candidates that have the same
     observation time as another candidate. The candidate with the lowest distance is kept.

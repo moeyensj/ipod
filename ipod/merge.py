@@ -18,7 +18,6 @@ from thor.orbit_determination.fitted_orbits import (
     drop_duplicate_orbits,
 )
 from thor.orbits.od import differential_correction
-from thor.utils.quivr import drop_duplicates
 
 from .ipod import OrbitOutliers, PrecoveryCandidates, SearchSummary
 from .main import iterative_precovery_and_differential_correction
@@ -136,13 +135,11 @@ def merge_and_extend_orbits(
         if orbit_members_iter.fragmented():
             orbit_members_iter = qv.defragment(orbit_members_iter)
 
-        precovery_candidates_unique = drop_duplicates(
-            precovery_candidates_iter, subset=["observation_id"]
+        precovery_candidates_unique = precovery_candidates_iter.drop_duplicates(
+            subset=["observation_id"]
         )
         if precovery_candidates_unique.fragmented():
             precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
-
-        precovery_candidates_unique = qv.defragment(precovery_candidates_unique)
 
         coordinates = precovery_candidates_unique.to_spherical_coordinates()
         observations_iter = Observations.from_kwargs(

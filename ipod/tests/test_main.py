@@ -7,6 +7,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
 import quivr as qv
+from adam_assist import ASSISTPropagator  # noqa: E402
 from adam_core.coordinates.covariances import CoordinateCovariances
 from adam_core.coordinates.origin import Origin
 from adam_core.coordinates.spherical import SphericalCoordinates
@@ -15,7 +16,6 @@ from adam_core.orbit_determination.evaluate import (
     OrbitDeterminationObservations,
     evaluate_orbits,
 )
-from adam_core.propagator.adam_pyoorb import PYOORBPropagator as PYOORB
 from adam_core.utils.helpers import make_observations, make_real_orbits
 from precovery.ingest import index
 from precovery.precovery_db import PrecoveryDatabase
@@ -78,7 +78,7 @@ def precovery_db(observations):
     exposures_df["exposure_mjd_mid"] = exposures_df["exposure_mjd_start"] + (
         (exposures_df["duration"] / 86400) / 2
     )
-    # getting issues with Rubin obscode plus pyoorb
+
     exposures_df = exposures_df[exposures_df["observatory_code"] != "X05"]
 
     detections_df = detections.to_dataframe()
@@ -199,7 +199,7 @@ def test_index(precovery_db, orbits):
     db, test_db_dir, offset_ids = precovery_db
     # precover one of our orbits
     orbit = orbits[0]
-    matches = [m for m in db.precover(orbit)]
+    matches = [m for m in db.precover(orbit, propagator_class=ASSISTPropagator)]
     assert len(matches) > 0
 
 
@@ -222,7 +222,7 @@ def test_ipod_orbit_outliers(precovery_db, orbits, observations, od_observations
 
         # We are only fitting on a subset of the observations so that ipod has some new obs to find
         fitted_orbits, fitted_orbit_members = evaluate_orbits(
-            orbit, od_observations_i[:10], propagator=PYOORB()
+            orbit, od_observations_i[:10], propagator=ASSISTPropagator()
         )
 
         detections_i = detections.apply_mask(
@@ -253,6 +253,7 @@ def test_ipod_orbit_outliers(precovery_db, orbits, observations, od_observations
             astrometric_errors={"default": (0.1, 0.1)},
             orbit_outliers=orbit_outliers,
             database=db,
+            propagator=ASSISTPropagator,
         )
 
         (
@@ -303,7 +304,7 @@ def test_ipod_orbit_outliers_all_bad(
 
         # We are only fitting on a subset of the observations so that ipod has some new obs to find
         fitted_orbits, fitted_orbit_members = evaluate_orbits(
-            orbit, od_observations_i[:10], propagator=PYOORB()
+            orbit, od_observations_i[:10], propagator=ASSISTPropagator()
         )
 
         detections_i = detections.apply_mask(
@@ -332,6 +333,7 @@ def test_ipod_orbit_outliers_all_bad(
             astrometric_errors={"default": (0.1, 0.1)},
             orbit_outliers=orbit_outliers,
             database=db,
+            propagator=ASSISTPropagator,
         )
 
         (
@@ -382,7 +384,7 @@ def test_ipod_runtime(precovery_db, orbits, observations, od_observations):
         )
 
         fitted_orbits, fitted_orbit_members = evaluate_orbits(
-            orbit, od_observations_i, propagator=PYOORB()
+            orbit, od_observations_i, propagator=ASSISTPropagator()
         )
 
         detections_i = detections.apply_mask(
@@ -402,6 +404,7 @@ def test_ipod_runtime(precovery_db, orbits, observations, od_observations):
             max_mjd=mjd_max.as_py() + 1.0,
             astrometric_errors={"default": (0.1, 0.1)},
             database=db,
+            propagator=ASSISTPropagator,
         )
         time_end = time.perf_counter()
 

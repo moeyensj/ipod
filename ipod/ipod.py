@@ -6,6 +6,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
+from adam_assist import ASSISTPropagator
 from adam_core.coordinates.residuals import calculate_reduced_chi2
 from adam_core.orbit_determination import (
     OrbitDeterminationObservations,
@@ -13,9 +14,7 @@ from adam_core.orbit_determination import (
 )
 from adam_core.orbits import Orbits
 from adam_core.propagator import Propagator
-from adam_core.propagator.adam_pyoorb import PYOORBPropagator as PYOORB
-from precovery.precovery_db import PrecoveryCandidatesQv as PrecoveryCandidates
-from precovery.precovery_db import PrecoveryDatabase
+from precovery.precovery_db import PrecoveryCandidates, PrecoveryDatabase
 from thor.orbit_determination import FittedOrbitMembers, FittedOrbits
 from thor.orbits.iod import iod
 from thor.orbits.od import od
@@ -83,7 +82,7 @@ def ipod(
     database: Union[str, PrecoveryDatabase] = "",
     datasets: Optional[set[str]] = None,
     orbit_outliers: Optional[OrbitOutliers] = None,
-    propagator: Type[Propagator] = PYOORB,
+    propagator: Type[Propagator] = ASSISTPropagator,
     propagator_kwargs: dict = {},
 ) -> Tuple[FittedOrbits, FittedOrbitMembers, PrecoveryCandidates, SearchSummary]:
 
@@ -395,6 +394,7 @@ def ipod(
             end_mjd=max_mjd_iter,
             window_size=1,
             datasets=datasets,
+            propagator_class=propagator,
         )
         candidates_iter = candidates_iter.sort_by(
             ["time.days", "time.nanos", "obscode"]
