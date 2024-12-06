@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=64", "wheel", "setuptools_scm>=8"]
-build-backend = "setuptools.build_meta"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
 
 [project]
 name = "ipod"
-requires-python = ">=3.10"
+requires-python = "<3.13,>=3.11"
 dynamic = ["version"]
 authors = [
     { name = "Kathleen Kiker", email = "kathleen@b612foundation.org" },
@@ -15,7 +15,7 @@ authors = [
 ]
 description = "Iterative precovery and differential correction of asteroid orbits"
 readme = "README.md"
-license = { file = "LICENSE.md", classifier = "BSD License" }
+license = { file = "LICENSE.md" }
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -28,20 +28,25 @@ classifiers = [
 ]
 
 dependencies = [
+    "adam-assist>=0.2.0",
     "numpy",
+    "adam_core>=0.3.0",
+    "numba>=0.60.0",
     "pyarrow>=14.0.0",
     "ray[default]",
-    "thor @ git+https://github.com/moeyensj/thor.git@857b808be575323b5954f67ea304149f27b7ef2c#egg=thor",
-    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@22fdd7f67bccc36d80ac35f52e83bc05b76ac31e#egg=precovery",
+    "thor @ git+https://github.com/moeyensj/thor.git@597f246f540151852c653dda5ebcae8537825415#egg=thor",
+    "precovery @ git+https://github.com/B612-Asteroid-Institute/precovery.git@186861a987fa053f9e03f77b3f469bb3c1311165#egg=precovery",
     "quivr>=0.7.3a1",
 ]
 
-[project.optional-dependencies]
-tests = [
+[dependency-groups]
+test = [
     "pre-commit",
     "pytest",
     "black",
     "isort",
+    "ruff",
+    "mypy",
     "pytest-cov",
     "pytest-benchmark",
 ]
@@ -49,14 +54,33 @@ tests = [
 [project.urls]
 "Homepage" = "https://github.com/b612-Asteroid-Institute/ipod"
 
-[tool.setuptools_scm]
-version_file = "ipod/version.py"
-
-[tool.setuptools.packages]
-find = {}
+[tool.pdm.version]
+source = "scm"
+write_to = "ipod/_version.py"
+write_template = "__version__ = '{}'"
 
 [tool.pytest.ini_options]
 python_functions = "test_*"
+
+
+[tool.pdm.scripts]
+check = { composite = ["lint", "typecheck"] }
+format = { composite = ["black ./ipod", "isort ./ipod"] }
+lint = { composite = [
+  "ruff check ./ipod",
+  "black --check ./ipod",
+  "isort --check-only ./ipod",
+] }
+fix = "ruff ./ipod --fix"
+typecheck = "mypy ./ipod"
+
+test = "pytest --benchmark-disable --ignore=__pypackages__ {args}"
+doctest = "pytest --ignore=__pypackages__ --doctest-plus --doctest-only"
+benchmark = "pytest --benchmark-only --ignore=__pypackages__"
+coverage = "pytest --cov=ipod --cov-report=xml --ignore=__pypackages__"
+
+[tool.pdm]
+distribution = true
 
 [tool.black]
 # Comfortable distance, but makes exceptions when appropriate.
